@@ -16,6 +16,11 @@ library(WorldFlora)
 
 setwd("G:/Shared drives/Urban Ecological Drought/Drought Tolerance Designations/PSI-TLP Data/Data for R_do not edit")
 
+# test 2
+# testing out the commit with Nicholas. Thank goodness he was
+# working on site today. 
+# Lyrics to an appropriate song. It's Friday. 
+
 
 coords<-read.csv("USA_LatLongs.csv",header=T)
 coords<-coords%>%
