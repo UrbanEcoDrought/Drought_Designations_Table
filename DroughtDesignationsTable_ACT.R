@@ -1,6 +1,6 @@
 # UED - Drought Designations Table
   # Osmotic potential at turgor loss point and P50
-    # Updated by - A. Tumino on 15January2024
+    # Updated by - A. Tumino on 20Feb2024
 
 library(data.table)
 library(googlesheets4)
@@ -11,16 +11,9 @@ library(stringr)
 library(reshape2)
 library(tidyr)
 library(plotly)
-#library(Rcmdr)
-library(WorldFlora)
 
+#test
 setwd("G:/Shared drives/Urban Ecological Drought/Drought Tolerance Designations/PSI-TLP Data/Data for R_do not edit")
-
-# test 2
-# testing out the commit with Nicholas. Thank goodness he was
-# working on site today. 
-# Lyrics to an appropriate song. It's Friday. 
-
 
 coords<-read.csv("USA_LatLongs.csv",header=T)
 coords<-coords%>%
@@ -41,7 +34,8 @@ jakedat <- jakedat %>%
          Cultivar = ifelse(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 2], NA_character_),
          sum.tlp = round(sum.tlp, 2),
          sum.opft = round(sum.opft, 2)) %>%
-  transmute(Species, garden, Source, Species_short, Cultivar,sum.tlp,sum.opft) # separate out cultivar
+  rename(psi.tlp = sum.tlp, psi.ft = sum.opft)%>%
+  transmute(Species, garden, Source, Species_short, Cultivar,psi.tlp,psi.ft) # separate out cultivar
 jakedat$Species_short <- str_trim(jakedat$Species_short, side = "right") # trim off trailing white space
 
 
@@ -58,6 +52,10 @@ jakedat<-jakedat%>% # combine with jake data frame (Hirons 2020 data)
   mutate(Longitude = round(Longitude, 4),
          Latitude = round(Latitude, 4))
 
+jakedat_lon<- jakedat %>%
+  pivot_longer(cols = -c(Species, garden, Source, Species_short,
+                         Cultivar, Country, Latitude, Longitude), names_to = "dat.type", values_to = "value")
+
 compiled<-read.csv("TRY Data Sjöman-Hirons Leaf Turgor Loss .csv",header=T)
 
 compiled <- compiled %>%
@@ -70,9 +68,13 @@ compiled <- compiled %>%
          Species_short = ifelse(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 1], Species),
          Cultivar = ifelse(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 2], NA_character_)) %>%
   transmute(Species,Species_short,Exposition,Maturity,Source,Reference,Cultivar,Osmotic_potential_full_turgor_MPa,
-            Leaf_turgor_loss_pt_MPa,Comments) # separate cultivar
+            Leaf_turgor_loss_pt_MPa,Comments) %>% # separate cultivar 
+  rename(psi.ft = Osmotic_potential_full_turgor_MPa, psi.tlp = Leaf_turgor_loss_pt_MPa)
 compiled$Species_short<- str_trim(compiled$Species_short, side = "right") # trim of trailing space
 
+compiled_lon <- compiled %>%
+  pivot_longer(cols = -c(Species, Exposition, Source, Species_short,
+                         Cultivar, Reference, Comments, Maturity), names_to = "dat.type", values_to = "value")
 #compiled<- melt(compiled, id = c("Species", "Location","Country","Latitude", # wide to long
 #                                "Longitude","Species_new", "Cultivar","Comments",
 #                                "Maturity","Source","Reference")) %>%
@@ -81,9 +83,9 @@ compiled$Species_short<- str_trim(compiled$Species_short, side = "right") # trim
 
 hirons<-jakedat%>%
   left_join(compiled,by=c("Species","Species_short","Cultivar"))%>%
-  rename(Source_Hirons = Source.x,P0_Hirons = sum.tlp, P100_Hirons = sum.opft,
-         Source_Sjoman = Source.y, P100_Sjoman = Osmotic_potential_full_turgor_MPa,
-         P0_Sjoman = Leaf_turgor_loss_pt_MPa, Refernce_Sjoman = Reference)%>%
+  rename(Source_Hirons = Source.x,Psi_tlp_Hirons = sum.tlp, Psi_ft_Hirons = sum.opft,
+         Source_Sjoman = Source.y, Psi_ft_Sjoman = Osmotic_potential_full_turgor_MPa,
+         Psi_tlp_Sjoman = Leaf_turgor_loss_pt_MPa, Refernce_Sjoman = Reference)%>%
   left_join(coords,by=c("Latitude","Longitude","Country","garden"))
 #150 obs
 
@@ -96,16 +98,86 @@ desig_list<-desig%>%
   mutate(Species = if_else(Species == "Platanus x acerifolia (syn hispanica)", "Platanus x acerifolia", Species),
          Species_new=Species)
 #desig_list<- data.frame(desig_list[1:159, ])
-desig_list<-data.frame(desig_list[-c(158,160:162,176:179)])
+desig_list<-data.frame(desig_list[-c(158,160:162,176:179),])
 
 
 
 
 # TRY Data ----------------------------------------------------------------
 
+#Adding in TRY Data pull 31506 from Jan 2024 request.
+
+trydat_2024 <- fread("31506.txt", header = T, sep = "\t", dec = ".", quote = "", data.table = T,
+                     encoding = "UTF-8")
+names(trydat_2024)
+unique(trydat_2024$DataName)
+str(trydat_2024)
+
+## Get metadata associated with any points from the trydata
+try24_met<-trydat_2024 %>%
+  select("AccSpeciesName","DatasetID","DataName","OrigValueStr") %>%
+  filter(DataName %like% "Location Country" | DataName %like% "Latitude" | DataName %like% "Longitude" |
+           DataName %like% "Plant developmental status" | DataName %like% "Origin of seed material" |
+           DataName %like%  "Reference/ source" | DataName %like% "Location / Site Name") #%>%
+  #pivot_wider(names_from = DataName, values_from = OrigValueStr)
+
+# find duplicated information
+trydat_2024 %>%
+  dplyr::group_by(AccSpeciesName, DatasetID,
+                  DataName) %>%
+  dplyr::summarise(n = dplyr::n(), .groups =
+                     "drop") %>%
+  dplyr::filter(n > 1L) 
+
+subset_l <- trydat_2024 %>%
+  select("AccSpeciesName","DatasetID","DataID","DataName","OrigValueStr") %>%
+  filter(DataName %ilike% "turgor loss point" | DataName %ilike% "full turgor") %>%
+  filter(OrigValueStr != 2016) %>%
+  mutate(DataName = case_when(
+    DataName == "Leaf water potential at turgor loss point" ~ "psi.tlp",
+    TRUE ~ DataName),
+    DataName = case_when(DataName == "Leaf osmotic potential at full turgor" ~ "psi.ft",
+    TRUE ~ DataName))
+# 1,102 observations of 4 vars  
+# All from Canada
+
+subset_w <- subset_l %>%
+  mutate(seq = row_number()) %>%
+  pivot_wider(names_from=DataName, values_from=OrigValueStr) #%>%
+#  rename("psi.tlp" = "Leaf water potential at turgor loss point", 
+ #        "psi.ft" = "Leaf osmotic potential at full turgor") #%>%
+  #mutate("psi_tlp" = as.numeric(psi_tlp), "psi_ft" = as.numeric(psi_ft))
+  
+try24_ref <- trydat_2024 %>%
+  select("DatasetID","DataID","Reference") #%>%
+  filter(!duplicated(.))
+# determine what references are associated with values.
+  
+subset_l %>%
+  group_by(DataName) %>%
+  summarize(Count=length(unique(AccSpeciesName)))
+# Full turgor - 65 species
+# TLP - 80 species
+
+subset_desig <- desig_list %>%
+  rename(AccSpeciesName = Species) %>%
+  left_join(subset_l) %>%
+  filter(!is.na(OrigValueStr))
+
+subset_desig %>%
+  group_by(DataName) %>%
+  summarize(Count = length(unique(AccSpeciesName)))
+# Full turgor - 13 species that intersect with our drought designations table.
+
+# Acer rubrum, Acer saccharum, Betula papyrifera, Cornus florida,
+# Fagus grandifolia, Liriodendron tulipifera, Magnolia stellata,
+# Ostrya virginiana, Prunus serotina, Quercus michauxii, Quercus rubra,
+# Quercus velutina, Sassafras albidum
 
 trydat <- fread("25193.txt", header = T, sep = "\t", dec = ".", quote = "", data.table = T,
                 encoding = "UTF-8")
+
+
 
 strings_to_match <- c("P50 (MPa)", "P12 (MPa)", "P88 (MPa)","P50","P88","lat","lon",
                       "LAT","LONG","Location","Lat","Lon","Country","Reference",
@@ -122,6 +194,7 @@ try_obs<-trydat %>%
   rename(P88="P88 (MPa)", P50_method="P50 method",P50="P50 (MPa)",
          Prov_Long="Provenance Longitude", Prov_Lat="Provenance Latitude")
 
+# This is the only way I know how to do this. 
 try_obs$Country<-as.character(try_obs$Country)
 try_obs$P50<-as.numeric(as.character(try_obs$P50))
 try_obs$P88<-as.numeric(as.character(try_obs$P88))
@@ -300,7 +373,7 @@ ggplotly(ggplot(tlp_des,aes(x=reorder(Species_short, P0_Hirons), y=P0_Hirons))+
 
 ggplotly(ggplot(tlp_des,aes(x=reorder(Genus, P0_Hirons), y=P0_Hirons))+
            labs(x="Genera",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-           geom_boxplot() + ggtitle("Drought Designations Genera - Hirons")+
+           geom_boxplot(outlier.color=NA) + ggtitle("Drought Designations Genera - Hirons")+
            theme_classic()+theme(axis.text.y=element_text(color="black",
                                                           size=10,vjust=0.5,
                                                           hjust=1,face="italic"),
