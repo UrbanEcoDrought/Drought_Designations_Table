@@ -5,6 +5,7 @@
 library(data.table)
 library(googlesheets4)
 library(ggplot2)
+library(ggpubr)
 library(dplyr)
 library(wrapr)
 library(stringr)
@@ -86,9 +87,9 @@ compiled_lon <- compiled %>%
 
 hirons<-jakedat%>%
   left_join(compiled,by=c("Species","Species_short","Cultivar"))%>%
-  rename(Source_Hirons = Source.x,Psi_tlp_Hirons = sum.tlp, Psi_ft_Hirons = sum.opft,
-         Source_Sjoman = Source.y, Psi_ft_Sjoman = Osmotic_potential_full_turgor_MPa,
-         Psi_tlp_Sjoman = Leaf_turgor_loss_pt_MPa, Refernce_Sjoman = Reference)%>%
+  rename(Source_Hirons = Source.x,Psi_tlp_Hirons = psi.tlp.x, Psi_ft_Hirons = psi.ft.x,
+         Source_Sjoman = Source.y, Psi_ft_Sjoman = psi.ft.y,
+         Psi_tlp_Sjoman = psi.tlp.y, Refernce_Sjoman = Reference)%>%
   left_join(coords,by=c("Latitude","Longitude","Country","garden"))
 #150 obs
 
@@ -379,7 +380,7 @@ length(unique(hirons_des$Species))
 length(unique(hirons_des$Genus))
 # 7 unique genera
 length(unique(hirons$Species_short))
-# 124 unique species total (not counting variety)
+# 129 unique species total (not counting variety)
 length(unique(hirons$Species))
 # 136 species with cultivar
 length(unique(hirons$Genus))
@@ -673,8 +674,8 @@ summary <- combined_long %>%
 # Summarize the dataframe to calculate mean values for each dat.type by Species_short
 
 # Plot for TLP and P50, IF there are multiple values per species, calculated
-# mean values 
-df<- combined_long %>%
+# mean values and plotted those. 
+a<-combined_long %>%
   filter(dat.type == "P50" | dat.type == "psi.tlp") %>%
   select(Species_short,dat.type, value) %>%
   group_by(Species_short, dat.type) %>%
@@ -686,6 +687,7 @@ df<- combined_long %>%
   pivot_wider(.,names_from = dat.type, values_from = Mean_Value) %>%
   filter(!is.na(P50),!is.na(psi.tlp)) %>%
   ggplot(., aes(x = P50, y = psi.tlp)) + geom_point()+
+  geom_smooth(method = "lm", color = "blue") +
   theme_classic()+theme(axis.text.y=element_text(color="black",
                                                  size=10,vjust=0.5,
                                                  hjust=1),
@@ -694,11 +696,89 @@ df<- combined_long %>%
                         axis.title=element_text(size=10),
                         legend.position="none") + 
   xlab("P50 (MPa)") + ylab("Water Potential at Turgor Loss Point (MPa)") 
+# no apparent pattern
+# positive trend, doesn't seem strong.
 
-plot(summary_df$psi.tlp ~ summary_df$P50) + 
-  abline(lm(summary_df$psi.tlp ~summary_df$P50))
+# Plot for TLP and P88, IF there are multiple values per species, calculated
+# mean values and plotted those. 
+b<-combined_long %>%
+  filter(dat.type == "P88" | dat.type == "psi.tlp") %>%
+  select(Species_short,dat.type, value) %>%
+  group_by(Species_short, dat.type) %>%
+  mutate(Mean_Value = mean(value),
+         # SD_Value = sd(value)
+  ) %>%
+  select(-value) %>%
+  distinct(.) %>%
+  pivot_wider(.,names_from = dat.type, values_from = Mean_Value) %>%
+  filter(!is.na(P88),!is.na(psi.tlp)) %>%
+  ggplot(., aes(x = P88, y = psi.tlp)) + geom_point()+
+  geom_smooth(method = "lm", color = "blue") +
+  theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                 size=10,vjust=0.5,
+                                                 hjust=1),
+                        axis.text.x=element_text(color="black",size=10),
+                        axis.ticks=element_line(color="black"),
+                        axis.title=element_text(size=10),
+                        legend.position="none") + 
+  xlab("P88 (MPa)") + ylab("Water Potential at Turgor Loss Point (MPa)") 
+# no apparent pattern
+# positive trend, doesn't seem strong.
 
-#filter(Count>1)
+# Plot for FT and P50, IF there are multiple values per species, calculated
+# mean values and plotted those. 
+c<-combined_long %>%
+  filter(dat.type == "P50" | dat.type == "psi.ft") %>%
+  select(Species_short,dat.type, value) %>%
+  group_by(Species_short, dat.type) %>%
+  mutate(Mean_Value = mean(value),
+         # SD_Value = sd(value)
+  ) %>%
+  select(-value) %>%
+  distinct(.) %>%
+  pivot_wider(.,names_from = dat.type, values_from = Mean_Value) %>%
+  filter(!is.na(P50),!is.na(psi.ft)) %>%
+  ggplot(., aes(x = P50, y = psi.ft)) + geom_point()+
+  geom_smooth(method = "lm", color = "blue") +
+  theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                 size=10,vjust=0.5,
+                                                 hjust=1),
+                        axis.text.x=element_text(color="black",size=10),
+                        axis.ticks=element_line(color="black"),
+                        axis.title=element_text(size=10),
+                        legend.position="none") + 
+  xlab("P50 (MPa)") + ylab("Water Potential at Full Turgor (MPa)") 
+# no apparent pattern
+# positive trend, doesn't seem strong.
+
+# Plot for FT and P88, IF there are multiple values per species, calculated
+# mean values and plotted those. 
+d<-combined_long %>%
+  filter(dat.type == "P88" | dat.type == "psi.ft") %>%
+  select(Species_short,dat.type, value) %>%
+  group_by(Species_short, dat.type) %>%
+  mutate(Mean_Value = mean(value),
+         # SD_Value = sd(value)
+  ) %>%
+  select(-value) %>%
+  distinct(.) %>%
+  pivot_wider(.,names_from = dat.type, values_from = Mean_Value) %>%
+  filter(!is.na(P88),!is.na(psi.ft)) %>%
+  ggplot(., aes(x = P88, y = psi.ft)) + geom_point()+
+  geom_smooth(method = "lm", color = "blue") +
+  theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                 size=10,vjust=0.5,
+                                                 hjust=1),
+                        axis.text.x=element_text(color="black",size=10),
+                        axis.ticks=element_line(color="black"),
+                        axis.title=element_text(size=10),
+                        legend.position="none") + 
+  xlab("P88 (MPa)") + ylab("Water Potential at Full Turgor (MPa)") 
+# no apparent pattern
+# positive trend, doesn't seem strong.
+
+ggarrange(a, b, c, d, ncol = 2, nrow = 2)
+# no obvious trends.
 
 # Old code 2 --------------------------------------------------------------
 
@@ -866,7 +946,7 @@ mutate(USDA_title_23=c("5b: -15 to -10",
   mutate(Zone_2023 = str_trim(Zone_2023),Temp_C=str_trim(Temp_C))
 # 15 distnct lat long coordinates for the entire data set.
 
-  # Old Code -----------------------------------------------------------------
+# Old Code -----------------------------------------------------------------
 
 
 jakedat<-jakedat %>% select(where(not_all_na)) %>%
