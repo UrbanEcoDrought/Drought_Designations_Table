@@ -1,6 +1,6 @@
 # UED - Drought Designations Table
   # Osmotic potential at turgor loss point and P50
-    # Updated by - A. Tumino on 20Feb2024
+    # Updated by - A. Tumino on 18March2024
 
 library(data.table)
 library(googlesheets4)
@@ -54,7 +54,9 @@ jakedat<-jakedat%>% # combine with jake data frame (Hirons 2020 data)
 
 jakedat_lon<- jakedat %>%
   pivot_longer(cols = -c(Species, garden, Source, Species_short,
-                         Cultivar, Country, Latitude, Longitude), names_to = "dat.type", values_to = "value")
+                         Cultivar, Country, Latitude, Longitude), names_to = "dat.type", values_to = "value") %>%
+  rename(Exposition = "garden") %>%
+  mutate(Reference = "Hirons", Maturity = NA, Comments = NA)
 
 compiled<-read.csv("TRY Data Sjöman-Hirons Leaf Turgor Loss .csv",header=T)
 
@@ -74,7 +76,8 @@ compiled$Species_short<- str_trim(compiled$Species_short, side = "right") # trim
 
 compiled_lon <- compiled %>%
   pivot_longer(cols = -c(Species, Exposition, Source, Species_short,
-                         Cultivar, Reference, Comments, Maturity), names_to = "dat.type", values_to = "value")
+                         Cultivar, Reference, Comments, Maturity), names_to = "dat.type", values_to = "value") %>%
+  mutate(Country = NA, Latitude = NA, Longitude = NA)
 #compiled<- melt(compiled, id = c("Species", "Location","Country","Latitude", # wide to long
 #                                "Longitude","Species_new", "Cultivar","Comments",
 #                                "Maturity","Source","Reference")) %>%
@@ -89,6 +92,29 @@ hirons<-jakedat%>%
   left_join(coords,by=c("Latitude","Longitude","Country","garden"))
 #150 obs
 
+# make into one long DF
+# Because all of this data is from Andy Hirons, there are duplicated rows across the two
+# datasets, where the jakedat_lon has more complete information.
+# The below code should combine columns where they match and then remove extra columns. 
+# As much origin information was retained by combining the Source and Reference columns to reflect
+# where the infomration came from.
+
+hirons_lon <- left_join(jakedat_lon, compiled_lon, by = c("Species", "dat.type","value")) %>%
+  mutate(
+    Exposition = coalesce(Exposition.x, Exposition.y),
+    Country = coalesce(Country.x, Country.y),
+    Latitude = coalesce(Latitude.x, Latitude.y),
+    Longitude = coalesce(Longitude.x, Longitude.y),
+    Maturity = coalesce(Maturity.x,Maturity.y),
+    Species_short = coalesce(Species_short.x, Species_short.y),
+    Comments = coalesce(Comments.x, Comments.y),
+    Cultivar = coalesce(Cultivar.x, Cultivar.y),
+    Source = paste(Source.x, Source.y, sep = ", "),
+    Reference = paste(Reference.x, Reference.y, sep = ", ")
+  ) %>%
+  select(-Exposition.x, -Country.x, -Latitude.x, -Longitude.x, -Exposition.y, -Country.y, -Latitude.y, -Longitude.y,
+         -Maturity.x, -Maturity.y, -Species_short.x, -Species_short.y, -Comments.x, -Comments.y, -Cultivar.x, -Cultivar.y, -Reference.x,
+         -Reference.y, -Source.x, -Source.y)
 
 # Google Sheets -----------------------------------------------------------
 desig<-data.frame(read_sheet(ss="https://docs.google.com/spreadsheets/d/1Ap2zxfzQ2tA7Vw2YFKWG5WlASvh_DakGJGc-i07YDOo/edit#gid=2107989582"))
@@ -137,7 +163,9 @@ subset_l <- trydat_2024 %>%
     DataName == "Leaf water potential at turgor loss point" ~ "psi.tlp",
     TRUE ~ DataName),
     DataName = case_when(DataName == "Leaf osmotic potential at full turgor" ~ "psi.ft",
-    TRUE ~ DataName))
+    TRUE ~ DataName),
+    Species_short = AccSpeciesName) %>%
+  rename(Species= "AccSpeciesName")
 # 1,102 observations of 4 vars  
 # All from Canada
 
@@ -150,17 +178,16 @@ subset_w <- subset_l %>%
   
 try24_ref <- trydat_2024 %>%
   select("DatasetID","DataID","Reference") #%>%
-  filter(!duplicated(.))
+  #filter(!duplicated(.))
 # determine what references are associated with values.
   
 subset_l %>%
   group_by(DataName) %>%
-  summarize(Count=length(unique(AccSpeciesName)))
+  summarize(Count=length(unique$Species))
 # Full turgor - 65 species
 # TLP - 80 species
 
 subset_desig <- desig_list %>%
-  rename(AccSpeciesName = Species) %>%
   left_join(subset_l) %>%
   filter(!is.na(OrigValueStr))
 
@@ -257,12 +284,34 @@ choat_try<-try_obs%>%
   rename(Location_try = Location,
          Reference_try = Reference)%>%
   full_join(choat, by = c("Species", "Country","Last","Latitude","Longitude","P50","P88"))%>%
-  distinct(P50, P88, Species, .keep_all = TRUE)
+  distinct(P50, P88, Species, .keep_all = TRUE) %>%
+  mutate(Species_short = Species)
 #1539
 #with distinct line it slims to 1474
 
+# Create an empty dataframe to store the results
+result_df <- data.frame(Species_short = character(), Listed_with_hirons_lon = character(), Listed_with_choat_try = character(), Listed_with_subset_l = character(), stringsAsFactors = FALSE)
 
+# Loop through each species
+for (Species_short in unique(c(hirons_lon$Species_short, choat_try$Species_short, subset_l$Species_short))) {
+  # Check if species is listed with certain data in each dataframe
+  listed_with_hirons_lon <- ifelse(Species_short %in% hirons_lon$Species_short, "X", "")
+  listed_with_choat_try <- ifelse(Species_short %in% choat_try$Species_short, "X", "")
+  listed_with_subset_l <- ifelse(Species_short %in% subset_l$Species_short, "X", "")
+  
+  # Append the result to the result dataframe
+  result_df <- rbind(result_df, data.frame(Species_short = Species_short, Listed_with_hirons_lon = listed_with_hirons_lon, Listed_with_choat_try = listed_with_choat_try, Listed_with_subset_l = listed_with_subset_l, stringsAsFactors = FALSE))
+}
 
+# Remove the first row (empty row) from result_df
+result_df <- result_df[-1, ]
+
+sum(rowSums(result_df[, c("Listed_with_hirons_lon", "Listed_with_choat_try", "Listed_with_subset_l")] == "X") == 3)
+# 6 species present in all three datasets.
+sum(rowSums(result_df[, c("Listed_with_hirons_lon", "Listed_with_choat_try")] == "X") == 2)
+# 22 species listed in both hirons and choat/try (p50 or p88)
+sum(rowSums(result_df[, c("Listed_with_hirons_lon", "Listed_with_subset_l")] == "X") == 2)
+# 10 species listed in both hirons and new try data (both are full turgor and tlp data)
 
 # 2024 Data Combination - HIRONS - Ptlp and Pft---------------------------------------------------
 
@@ -279,48 +328,48 @@ choat_try<-try_obs%>%
 # Instead of merging the data frames together, pull information from one to the other 
 # based on the columns that they do or do not have in common. 
 
-hirons<-hirons %>%
+hirons_lon<-hirons_lon %>%
   mutate(Species_short = ifelse(Species_short =="Ulmus",Species,Species_short ))#%>%
 #  left_join(desig_list, by = "Species")
   
-hirons$Table <- ""
+hirons_lon$Table <- ""
 
 # Loop through each row in test
-for (i in 1:nrow(hirons)) {
+for (i in 1:nrow(hirons_lon)) {
   # Check if the Species names in the test df match any of the 
   # species names in the drought designation table
-  if (hirons$Species_short[i] %in% desig_list$Species_new) {
-    hirons$Table[i] <- "X"  # Mark 'X' in Table if there's a match
+  if (hirons_lon$Species_short[i] %in% desig_list$Species_new) {
+    hirons_lon$Table[i] <- "X"  # Mark 'X' in Table if there's a match
   }
 }
-#150
+# 90
 
 # Include all of the elms
-hirons<-hirons%>%
+hirons<-hirons_lon%>%
   #  mutate(Table=ifelse("Ulmus" %in% Species_new,Table=="X",Table))
   mutate(Table = ifelse(grepl("ulmus", Species_short, ignore.case = TRUE), "X", Table))
+# 128
 
 hirons<-hirons%>%
   #filter(Table=="X")%>%
   mutate(Genus = str_split(Species, " ", simplify = TRUE)[, 1])%>%
   mutate(Genus = str_trim(Genus))
-# 100 rows
+# 300 rows
 
 hirons_des<-hirons %>% filter (Table == "X")
-# 64 rows
+# 128 rows
 hirons_des%>%  
   filter(Country == "USA") %>%
-  group_by(Zone_2023)%>%
+  #group_by(Zone_2023)%>%
   summarise(Count_USDA = length(unique(Species)))
 length(unique(hirons_des$Species[hirons_des$Country=="USA"]))
-# 58 unique species (including variety/cultivar)
 # 49 in the USA
 
 hirons_des%>%  
   filter(Country == "USA") %>%
-  group_by(Zone_2023)%>%
+#  group_by(Zone_2023)%>%
   summarise(Count_USDA = length(unique(Species_short)))
-
+# 45
 
 
 length(unique(hirons_des$Species_short))
@@ -348,16 +397,17 @@ hirons_des%>%
 # Graphing the Ptlp data - 43 species that intersect with our current list
 
 tlp_des<-hirons_des %>%
+  filter(dat.type == "psi.tlp") %>%
   group_by(Species_short)%>%
-  summarise(Count = length(P0_Hirons),
-            Mean_TLP=mean(P0_Hirons),
-            SD_TLP=sd(P0_Hirons),
-            SE_TLP= sd(P0_Hirons) / sqrt(n())) %>%
+  summarise(Count = length(value),
+            Mean_TLP=mean(value),
+            SD_TLP=sd(value),
+            SE_TLP= sd(value) / sqrt(n())) %>%
   mutate(Mean_TLP = round(Mean_TLP, 2),SD_TLP = round(SD_TLP,2),
          SE_TLP=round(SE_TLP,2))%>%
   left_join(hirons_des)#%>%
 #  filter(Count>1)
-ggplotly(ggplot(tlp_des,aes(x=reorder(Species_short, P0_Hirons), y=P0_Hirons))+
+ggplotly(ggplot(tlp_des,aes(x=reorder(Species_short, value), y=value))+
            labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
            geom_boxplot() + ggtitle("Drought Designations Species - Hirons")+
            theme_classic()+theme(axis.text.y=element_text(color="black",
@@ -368,10 +418,10 @@ ggplotly(ggplot(tlp_des,aes(x=reorder(Species_short, P0_Hirons), y=P0_Hirons))+
                                  axis.title=element_text(size=10),
                                  legend.position="none")+ coord_flip()+
            geom_point(aes(text = paste("<br>Cultivar:",Cultivar,"<br>Country:",Country),
-                      col=garden)))
+                      col=Exposition)))
 
 
-ggplotly(ggplot(tlp_des,aes(x=reorder(Genus, P0_Hirons), y=P0_Hirons))+
+ggplotly(ggplot(tlp_des,aes(x=reorder(Genus, value), y=value))+
            labs(x="Genera",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
            geom_boxplot(outlier.color=NA) + ggtitle("Drought Designations Genera - Hirons")+
            theme_classic()+theme(axis.text.y=element_text(color="black",
@@ -380,24 +430,25 @@ ggplotly(ggplot(tlp_des,aes(x=reorder(Genus, P0_Hirons), y=P0_Hirons))+
                                  axis.text.x=element_text(color="black",size=10),
                                  axis.ticks=element_line(color="black"),
                                  axis.title=element_text(size=10),
-                                 legend.position="none")+ coord_flip()+
+                                 legend.position="none")+ coord_flip()+#
            geom_point(aes(text = paste("<br>Species:",Species_short,"<br>Cultivar:",Cultivar,"<br>Country:",Country),
-                          col=garden)))
+                          col=Exposition)))
 
 
 # Graphing the Ptlp data - all species Andy had data for
 
 tlp<-hirons %>%
+  filter(dat.type == "psi.tlp") %>%
   group_by(Species_short)%>%
-  summarise(Count = length(P0_Hirons),
-            Mean_TLP=mean(P0_Hirons),
-            SD_TLP=sd(P0_Hirons),
-            SE_TLP= sd(P0_Hirons) / sqrt(n())) %>%
+  summarise(Count = length(value),
+            Mean_TLP=mean(value),
+            SD_TLP=sd(value),
+            SE_TLP= sd(value) / sqrt(n())) %>%
   mutate(Mean_TLP = round(Mean_TLP, 2),SD_TLP = round(SD_TLP,2),
          SE_TLP=round(SE_TLP,2))%>%
   left_join(hirons)#%>%
 #  filter(Count>1)
-ggplotly(ggplot(tlp,aes(x=reorder(Species_short, P0_Hirons), y=P0_Hirons))+
+ggplotly(ggplot(tlp,aes(x=reorder(Species_short, value), y= value))+
            labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
            geom_boxplot() + ggtitle("Full Species List - Hirons")+
            theme_classic()+theme(axis.text.y=element_text(color="black",
@@ -408,10 +459,10 @@ ggplotly(ggplot(tlp,aes(x=reorder(Species_short, P0_Hirons), y=P0_Hirons))+
                                  axis.title=element_text(size=10),
                                  legend.position="none")+ coord_flip()+
            geom_point(aes(text = paste("<br>Cultivar:",Cultivar,"<br>Country:",Country),
-                          col=garden)))
+                          col=Exposition)))
 
 
-ggplotly(ggplot(tlp,aes(x=reorder(Genus, P0_Hirons), y=P0_Hirons))+
+ggplotly(ggplot(tlp,aes(x=reorder(Genus, value), y= value))+
            labs(x="Genera",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
            geom_boxplot() + ggtitle("All Genera - Hirons")+
            theme_classic()+theme(axis.text.y=element_text(color="black",
@@ -423,7 +474,7 @@ ggplotly(ggplot(tlp,aes(x=reorder(Genus, P0_Hirons), y=P0_Hirons))+
                                  legend.position="none")+ coord_flip()+
            geom_point(aes(text = paste("<br>Species:",Species_short,"<br>Cultivar:",Cultivar,
                                        "<br>Country:",Country),
-                          col=garden)))
+                          col=Exposition)))
 
 # Summary of P50 and P88 ----------------------------------
 
@@ -589,33 +640,65 @@ see<-choat_des %>%
  # summarize(Count = length(Species))
 # 131 species that have both P50 and P88  
 
-# Coordinates for Choat_designations --------------------------------------
+
+# Scatter Plots for Luke - 18 03 2024 -------------------------------------
+
+# Data with TLP and FT - hirons_lon (long) and subset_l (long)
+# Data with P50 and P88 - choat_try (wide) OR choat_lon (long)
 
 
-coord_choat<-choat_des%>%
-  select("Latitude","Longitude","Country")%>%
-  filter(!is.na(Latitude) & !is.na(Longitude)& Country=="USA")%>% 
-  distinct(Latitude, Longitude, .keep_all = TRUE)#%>% 
-  mutate(USDA_title_23=c("5b: -15 to -10",
-                    "6a: -10 to -5",
-                    "7a: 0 to 5",
-                    "8a: 10 to 15",
-                    "5a: -20 to -15",
-                    "6b: -5 to 0",
-                    "3b: -35 to -30",
-                    "8a: 10 to 15",
-                    "8b: 15 to 20",
-                    "7a: 0 to 5",
-                    "6a: -10 to -5",
-                    "8a: 10 to 15",
-                    "10b: 35 to 40",
-                    "4b: -25 to -20",
-                    "7b: 5 to 10"))%>%
-  separate(USDA_title_23, into = c("Zone_2023", "Temp_C"), sep = ": ", remove = FALSE)%>%
- mutate(Zone_2023 = str_trim(Zone_2023),Temp_C=str_trim(Temp_C))
-# 15 distnct lat long coordinates for the entire data set.
+# make choat_try long
+choat_lon <-choat_try %>%
+  select("Species", "Location_try", "Reference_try","Latitude",
+         "Longitude", "Country", "Reference", "Comments", "Source",
+         "Genus","Species_short", "P50", "P88") %>%
+  pivot_longer(cols = -c(Species, Location_try, Reference_try, Latitude,
+                         Longitude, Country, Genus, Source, Species_short,
+                         Reference, Comments),
+               names_to = "dat.type", values_to = "value") %>%
+  filter(!is.na(value))
 
+# We want to see what data we have for what species.
+# Make an ugly, long dataframe that can be summarized.
+combined_long <- bind_rows(choat_lon, hirons_lon, subset_l)
+
+summary <- combined_long %>%
+  group_by(Species_short, dat.type) %>%
+  summarize(Count = n())
   
+
+
+
+
+# Summarize the dataframe to calculate mean values for each dat.type by Species_short
+
+# Plot for TLP and P50, IF there are multiple values per species, calculated
+# mean values 
+df<- combined_long %>%
+  filter(dat.type == "P50" | dat.type == "psi.tlp") %>%
+  select(Species_short,dat.type, value) %>%
+  group_by(Species_short, dat.type) %>%
+  mutate(Mean_Value = mean(value),
+        # SD_Value = sd(value)
+         ) %>%
+  select(-value) %>%
+  distinct(.) %>%
+  pivot_wider(.,names_from = dat.type, values_from = Mean_Value) %>%
+  filter(!is.na(P50),!is.na(psi.tlp)) %>%
+  ggplot(., aes(x = P50, y = psi.tlp)) + geom_point()+
+  theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                 size=10,vjust=0.5,
+                                                 hjust=1),
+                        axis.text.x=element_text(color="black",size=10),
+                        axis.ticks=element_line(color="black"),
+                        axis.title=element_text(size=10),
+                        legend.position="none") + 
+  xlab("P50 (MPa)") + ylab("Water Potential at Turgor Loss Point (MPa)") 
+
+plot(summary_df$psi.tlp ~ summary_df$P50) + 
+  abline(lm(summary_df$psi.tlp ~summary_df$P50))
+
+#filter(Count>1)
 
 # Old code 2 --------------------------------------------------------------
 
@@ -756,6 +839,32 @@ ggplotly(ggplot(plot50,aes(x=Species_new, y=Psi))+
                                  axis.title=element_text(size=10),
                                  legend.position="none")+ coord_flip()+
            geom_point(aes(col=Location)))
+
+# Coordinates for Choat_designations --------------------------------------
+
+
+coord_choat<-choat_des%>%
+  select("Latitude","Longitude","Country")%>%
+  filter(!is.na(Latitude) & !is.na(Longitude)& Country=="USA")%>% 
+  distinct(Latitude, Longitude, .keep_all = TRUE)#%>% 
+mutate(USDA_title_23=c("5b: -15 to -10",
+                       "6a: -10 to -5",
+                       "7a: 0 to 5",
+                       "8a: 10 to 15",
+                       "5a: -20 to -15",
+                       "6b: -5 to 0",
+                       "3b: -35 to -30",
+                       "8a: 10 to 15",
+                       "8b: 15 to 20",
+                       "7a: 0 to 5",
+                       "6a: -10 to -5",
+                       "8a: 10 to 15",
+                       "10b: 35 to 40",
+                       "4b: -25 to -20",
+                       "7b: 5 to 10"))%>%
+  separate(USDA_title_23, into = c("Zone_2023", "Temp_C"), sep = ": ", remove = FALSE)%>%
+  mutate(Zone_2023 = str_trim(Zone_2023),Temp_C=str_trim(Temp_C))
+# 15 distnct lat long coordinates for the entire data set.
 
   # Old Code -----------------------------------------------------------------
 
