@@ -349,7 +349,7 @@ for (i in 1:nrow(hirons_lon)) {
 hirons<-hirons_lon%>%
   #  mutate(Table=ifelse("Ulmus" %in% Species_new,Table=="X",Table))
   mutate(Table = ifelse(grepl("ulmus", Species_short, ignore.case = TRUE), "X", Table))
-# 128
+# 300
 
 hirons<-hirons%>%
   #filter(Table=="X")%>%
@@ -506,7 +506,7 @@ choat_try<-choat_try%>%
 choat_des<- choat_try %>%
   filter(Table=="X") %>%
   left_join(coords,by=c("Latitude","Longitude","Country"))
-
+#202 
 
 choat_try %>%
   filter(!is.na(P50))%>%
@@ -663,6 +663,12 @@ choat_lon <-choat_try %>%
 # Make an ugly, long dataframe that can be summarized.
 combined_long <- bind_rows(choat_lon, hirons_lon, subset_l)
 
+### 25/3/2024: Start here tomorrow. Looks like the bind_rows did not properly
+# work. Column called dat.type and DataName, not all psi.ft or tlp data
+# is included in the graphs.
+
+# include on plot: R, P, N. 
+
 summary <- combined_long %>%
   group_by(Species_short, dat.type) %>%
   summarize(Count = n())
@@ -695,7 +701,7 @@ a<-combined_long %>%
                         axis.ticks=element_line(color="black"),
                         axis.title=element_text(size=10),
                         legend.position="none") + 
-  xlab("P50 (MPa)") + ylab("Water Potential at Turgor Loss Point (MPa)") 
+  xlab("") + ylab("Water Potential at TLP (MPa)") 
 # no apparent pattern
 # positive trend, doesn't seem strong.
 
@@ -721,7 +727,7 @@ b<-combined_long %>%
                         axis.ticks=element_line(color="black"),
                         axis.title=element_text(size=10),
                         legend.position="none") + 
-  xlab("P88 (MPa)") + ylab("Water Potential at Turgor Loss Point (MPa)") 
+  xlab("") + ylab("") 
 # no apparent pattern
 # positive trend, doesn't seem strong.
 
@@ -753,18 +759,34 @@ c<-combined_long %>%
 
 # Plot for FT and P88, IF there are multiple values per species, calculated
 # mean values and plotted those. 
-d<-combined_long %>%
+d_df<-combined_long %>%
   filter(dat.type == "P88" | dat.type == "psi.ft") %>%
   select(Species_short,dat.type, value) %>%
   group_by(Species_short, dat.type) %>%
   mutate(Mean_Value = mean(value),
-         # SD_Value = sd(value)
+          SD_Value = sd(value)
   ) %>%
   select(-value) %>%
   distinct(.) %>%
-  pivot_wider(.,names_from = dat.type, values_from = Mean_Value) %>%
-  filter(!is.na(P88),!is.na(psi.ft)) %>%
-  ggplot(., aes(x = P88, y = psi.ft)) + geom_point()+
+  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value)) %>%
+  filter(!is.na(Mean_Value_P88),!is.na(Mean_Value_psi.ft))
+
+correlation <- cor(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft)
+# r = 0.46
+p_value <- cor.test(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft)$p.value
+# p = 0.04
+shapiro.test((d_df$Mean_Value_P88))
+# not normal
+shapiro.test(d_df$Mean_Value_psi.ft)
+# normal
+
+# try for spearman correlation
+correlation <- cor.test(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft, type='spearman')$estimate
+# r = 0.46
+p_value <- cor.test(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft, type='spearman')$p.value
+# p = 0.04
+
+d<-ggplot(d_df, aes(x = Mean_Value_P88, y = Mean_Value_psi.ft)) + geom_point()+
   geom_smooth(method = "lm", color = "blue") +
   theme_classic()+theme(axis.text.y=element_text(color="black",
                                                  size=10,vjust=0.5,
@@ -773,12 +795,50 @@ d<-combined_long %>%
                         axis.ticks=element_line(color="black"),
                         axis.title=element_text(size=10),
                         legend.position="none") + 
-  xlab("P88 (MPa)") + ylab("Water Potential at Full Turgor (MPa)") 
-# no apparent pattern
-# positive trend, doesn't seem strong.
+  xlab("P88 (MPa)") + ylab("") +
+  annotate("text", x = min(d_df$Mean_Value_P88+2), y = max(d_df$Mean_Value_psi.ft), 
+           label = paste("r(s):", round(correlation, 2), "\n", 
+                         "p-value:", round(p_value, 3), "\n",
+                         "n:", 21),
+           hjust = 1, vjust = 1) +
+  geom_errorbar(
+    aes(ymin = d_df$Mean_Value_psi.ft - d_df$SD_Value_psi.ft,
+        ymax = d_df$Mean_Value_psi.ft + d_df$SD_Value_psi.ft),
+    width = 0.1,
+    color = "black"
+  ) +
+  geom_errorbarh(
+    aes(xmin = d_df$Mean_Value_P88 - d_df$SD_Value_P88,
+        xmax = d_df$Mean_Value_P88 + d_df$SD_Value_P88),
+    height = 0.1,
+    color = "black"
+  ) 
+
 
 ggarrange(a, b, c, d, ncol = 2, nrow = 2)
 # no obvious trends.
+
+
+# ERA5 Data ---------------------------------------------------------------
+
+# on 19 March 2024, I downloaded the last 30 years of temperature and 
+# precipitation data from ERA5 per Trent Ford's recommendation (see below for 
+# communication)
+
+# "I *think* I recommended a global temperature and precipitation data set 
+# that you could easily download/query to compare Chicago's climate to the 
+# climates of areas where you have data. My favorite global data set is ERA5, 
+# and you can download monthly data - including temperature, precipitation, etc.
+# - either globally or for smaller regions here:
+# https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-single-levels-monthly-means?tab=form 
+# There are also Python and R scripts already made to help batch download if 
+# you need to. My recommendation is to just use the last 30 years or so of 
+# data to generalize climate of areas where you have data." ~Trent 20 Feb 2024
+
+# Test downloaded the IL area and the file is stored in the 
+# Data for R folder on the drive.
+
+
 
 # Old code 2 --------------------------------------------------------------
 
