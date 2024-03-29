@@ -30,6 +30,7 @@ jakedat <- read.csv("Jake summary data.csv", header = TRUE)
 jakedat <- jakedat %>%
   mutate(Species = if_else(species == "Quercus muhlenbergii", "Quercus muehlenbergii", species), #fix spelling
          Source = "Hirons et al. 2020", # add source information
+         #Source_file = "jakedat",
          #Comments = NA, # dummy column
          Species_short = ifelse(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 1], Species),
          Cultivar = ifelse(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 2], NA_character_),
@@ -57,7 +58,7 @@ jakedat_lon<- jakedat %>%
   pivot_longer(cols = -c(Species, garden, Source, Species_short,
                          Cultivar, Country, Latitude, Longitude), names_to = "dat.type", values_to = "value") %>%
   rename(Exposition = "garden") %>%
-  mutate(Reference = "Hirons", Maturity = NA, Comments = NA)
+  mutate(Reference = "Hirons", Maturity = NA, Comments = NA, Source_file = "jakedat")
 
 compiled<-read.csv("TRY Data Sjöman-Hirons Leaf Turgor Loss .csv",header=T)
 
@@ -65,6 +66,7 @@ compiled <- compiled %>%
   rename(Reference="Source")%>% # rename column
   mutate(Species = if_else(Species == "Quercus muhlenbergii", "Quercus muehlenbergii", Species), # fix spelling
          Source = "Sjoman et al. 2018", # add source column
+         #Source_file = "compiled",
          #Latitude = NA, # dummy column
          #Longitude = NA, # dummy column
          #Country = NA, # dummy column
@@ -78,7 +80,7 @@ compiled$Species_short<- str_trim(compiled$Species_short, side = "right") # trim
 compiled_lon <- compiled %>%
   pivot_longer(cols = -c(Species, Exposition, Source, Species_short,
                          Cultivar, Reference, Comments, Maturity), names_to = "dat.type", values_to = "value") %>%
-  mutate(Country = NA, Latitude = NA, Longitude = NA)
+  mutate(Country = NA, Latitude = NA, Longitude = NA, Source_file = "compiled")
 #compiled<- melt(compiled, id = c("Species", "Location","Country","Latitude", # wide to long
 #                                "Longitude","Species_new", "Cultivar","Comments",
 #                                "Maturity","Source","Reference")) %>%
@@ -110,12 +112,13 @@ hirons_lon <- left_join(jakedat_lon, compiled_lon, by = c("Species", "dat.type",
     Species_short = coalesce(Species_short.x, Species_short.y),
     Comments = coalesce(Comments.x, Comments.y),
     Cultivar = coalesce(Cultivar.x, Cultivar.y),
+    Source_file = coalesce(Source_file.x, Source_file.y),
     Source = paste(Source.x, Source.y, sep = ", "),
     Reference = paste(Reference.x, Reference.y, sep = ", ")
   ) %>%
   select(-Exposition.x, -Country.x, -Latitude.x, -Longitude.x, -Exposition.y, -Country.y, -Latitude.y, -Longitude.y,
          -Maturity.x, -Maturity.y, -Species_short.x, -Species_short.y, -Comments.x, -Comments.y, -Cultivar.x, -Cultivar.y, -Reference.x,
-         -Reference.y, -Source.x, -Source.y)
+         -Reference.y, -Source.x, -Source.y, -Source_file.x, -Source_file.y)
 
 # Google Sheets -----------------------------------------------------------
 desig<-data.frame(read_sheet(ss="https://docs.google.com/spreadsheets/d/1Ap2zxfzQ2tA7Vw2YFKWG5WlASvh_DakGJGc-i07YDOo/edit#gid=2107989582"))
@@ -157,7 +160,7 @@ trydat_2024 %>%
   dplyr::filter(n > 1L) 
 
 subset_l <- trydat_2024 %>%
-  select("AccSpeciesName","DatasetID","DataID","DataName","OrigValueStr") %>%
+  select("AccSpeciesName","DatasetID","DataID","ObservationID","DataName","OrigValueStr", "Reference") %>%
   filter(DataName %ilike% "turgor loss point" | DataName %ilike% "full turgor") %>%
   filter(OrigValueStr != 2016) %>%
   mutate(DataName = case_when(
@@ -168,11 +171,78 @@ subset_l <- trydat_2024 %>%
     Species_short = AccSpeciesName) %>%
   rename(Species= "AccSpeciesName")
 # 1,102 observations of 4 vars  
-# All from Canada
+
+strings_to_match24 <- c("Location Region","Location Name","Location Country","Location Site ID","Reference",
+                      "Latitude","Longitude","LATnew","LONnew")
+
+
+dms_to_decimal <- function(dms_string) {
+  dms <- unlist(strsplit(dms_string, "[^0-9.]"))
+  degrees <- as.numeric(dms[1])
+  minutes <- as.numeric(dms[2])
+  seconds <- as.numeric(dms[3])
+  
+  #direction <- substr(dms_string, nchar(dms_string)-1, nchar(dms_string))  # Extract direction
+  
+  decimal_degrees <- degrees + minutes/60 + seconds/3600
+ # if (toupper(direction) %in% c("S", "W")) {
+   # decimal_degrees <- -decimal_degrees
+  #}
+  return(decimal_degrees)
+}
+
+try_obs24<-trydat_2024 %>%
+  filter(DataName=="Leaf water potential at turgor loss point"|DataName=="Leaf osmotic potential at full turgor")%>%
+  select(ObservationID)%>% distinct(ObservationID)%>%
+  inner_join(.,trydat_2024, by = "ObservationID")%>% 
+  filter(grepl(paste(strings_to_match24, collapse = "|"), DataName))%>%
+  select(ObservationID, DatasetID,DataName,OrigValueStr,SpeciesName)%>%
+  pivot_wider(names_from=DataName,values_from=OrigValueStr) %>%
+  rename(Species_short = "SpeciesName") #%>%
+  #mutate(Latitude = ifelse(Latitude == "41� 20' 42''", "41.345", Latitude),
+  #       Longitude = ifelse(Longitude == "1� 2' 4''", "41.345", Longitude))
+  #mutate(Latitude = ifelse(Latitude %like% "<ba>", "d", Latitude),
+  #    Longitude = ifelse(Longitude %like% "<ba>", "d", Longitude))
+
+try_obs24$Latitude <- gsub("[^0-9.']", "", try_obs24$Latitude)
+try_obs24$Longitude <- gsub("[^0-9.']", "", try_obs24$Longitude)
+
+# Replace empty strings with NA
+try_obs24$Latitude[try_obs24$Latitude == ""] <- NA
+try_obs24$Longitude[try_obs24$Longitude == ""] <- NA
+
+# Convert degrees, minutes, and seconds to decimal format
+try_obs24 <- try_obs24 %>%
+  mutate(Latitude_decimal = dms_to_decimal(Latitude),
+         Longitude_decimal = dms_to_decimal(Longitude))
+
+test <- try_obs24 %>%
+  select(DatasetID, Latitude, Latitude_decimal, Longitude, Longitude_decimal)
+
+# 29 / 3 / 2024 - This isn't quite working yet. It is pasting
+# the same value for all the lat/long to decimals. Going to move on 
+# and just make the plots for Luke and deal with this later on.
+
+subset_l <- subset_l %>%
+  inner_join(.,try_obs24,by=c("ObservationID","Species_short")) 
+
+
+
+
+
+
+# 26/3/2024 with following 3 lines. Want to add reference column to subset_l
+subset_l <- subset_l %>%
+  rename(dat.type = DataName, value = OrigValueStr, Source = "Reference / source",
+         Country = "Location Country", Exposition = "Location Name") %>%
+  mutate(value = as.numeric(value), Latitude = as.numeric(Latitude), Longitude = as.numeric(Longitude)) %>%
+  select(-`DatasetID.x`, -`DatasetID.y`, -`Location Site ID`,-`Latitude of provenance of seed / transplant / seedling`,
+         -`Longitude of provenance of seed / transplant / seedling`, -`Location Region`,-'Latitude_decimal',
+         -'Longitude_decimal')
 
 subset_w <- subset_l %>%
   mutate(seq = row_number()) %>%
-  pivot_wider(names_from=DataName, values_from=OrigValueStr) #%>%
+  pivot_wider(names_from=dat.type, values_from=value) #%>%
 #  rename("psi.tlp" = "Leaf water potential at turgor loss point", 
  #        "psi.ft" = "Leaf osmotic potential at full turgor") #%>%
   #mutate("psi_tlp" = as.numeric(psi_tlp), "psi_ft" = as.numeric(psi_ft))
@@ -182,19 +252,19 @@ try24_ref <- trydat_2024 %>%
   #filter(!duplicated(.))
 # determine what references are associated with values.
   
-subset_l %>%
-  group_by(DataName) %>%
-  summarize(Count=length(unique$Species))
+#subset_l %>%
+#  group_by(DataName) %>%
+#  summarize(Count=length(unique$Species))
 # Full turgor - 65 species
 # TLP - 80 species
 
 subset_desig <- desig_list %>%
   left_join(subset_l) %>%
-  filter(!is.na(OrigValueStr))
+  filter(!is.na(value))
 
-subset_desig %>%
-  group_by(DataName) %>%
-  summarize(Count = length(unique(AccSpeciesName)))
+#subset_desig %>%
+#  group_by(DataName) %>%
+#  summarize(Count = length(unique(AccSpeciesName)))
 # Full turgor - 13 species that intersect with our drought designations table.
 
 # Acer rubrum, Acer saccharum, Betula papyrifera, Cornus florida,
@@ -249,7 +319,8 @@ try_obs<-try_obs%>%
          P50 = round(P50, 2),
          P88 = round(P88, 2),
          LATnew = round(LATnew, 4),
-         LONnew = round (LONnew, 4))%>%
+         LONnew = round (LONnew, 4),
+         Source = "TRY 25193")%>%
   rename(Species = SpeciesName)%>%
   filter(!duplicated(select(., -ObservationID)))%>%
   mutate(Last = word(Reference, 1, sep = " "))%>%
@@ -283,10 +354,12 @@ family$Family<-trimws(family$Family,"both")
 
 choat_try<-try_obs%>%
   rename(Location_try = Location,
-         Reference_try = Reference)%>%
+         Reference = Reference)%>%
   full_join(choat, by = c("Species", "Country","Last","Latitude","Longitude","P50","P88"))%>%
   distinct(P50, P88, Species, .keep_all = TRUE) %>%
-  mutate(Species_short = Species)
+  mutate(Species_short = Species, Reference = coalesce(Reference.x, Reference.y),
+         Source = coalesce(Source.x, Source.y)) %>%
+  select(-Reference.x, -Reference.y, -Source.x, -Source.y)
 #1539
 #with distinct line it slims to 1474
 
@@ -650,22 +723,29 @@ see<-choat_des %>%
 
 # make choat_try long
 choat_lon <-choat_try %>%
-  select("Species", "Location_try", "Reference_try","Latitude",
+  select("Species", "Location_try", "Reference","Latitude",
          "Longitude", "Country", "Reference", "Comments", "Source",
          "Genus","Species_short", "P50", "P88") %>%
-  pivot_longer(cols = -c(Species, Location_try, Reference_try, Latitude,
+  pivot_longer(cols = -c(Species, Location_try, Reference, Latitude,
                          Longitude, Country, Genus, Source, Species_short,
                          Reference, Comments),
                names_to = "dat.type", values_to = "value") %>%
+  rename(Exposition = Location_try)%>%
   filter(!is.na(value))
 
 # We want to see what data we have for what species.
 # Make an ugly, long dataframe that can be summarized.
-combined_long <- bind_rows(choat_lon, hirons_lon, subset_l)
 
 ### 25/3/2024: Start here tomorrow. Looks like the bind_rows did not properly
 # work. Column called dat.type and DataName, not all psi.ft or tlp data
 # is included in the graphs.
+
+
+
+
+
+# combine rows
+combined_long <- bind_rows(choat_lon, hirons_lon, subset_l)
 
 # include on plot: R, P, N. 
 
@@ -681,19 +761,41 @@ summary <- combined_long %>%
 
 # Plot for TLP and P50, IF there are multiple values per species, calculated
 # mean values and plotted those. 
-a<-combined_long %>%
+a_df<-combined_long %>%
   filter(dat.type == "P50" | dat.type == "psi.tlp") %>%
   select(Species_short,dat.type, value) %>%
   group_by(Species_short, dat.type) %>%
   mutate(Mean_Value = mean(value),
-        # SD_Value = sd(value)
+        SD_Value = sd(value),
+        Count = n()
          ) %>%
   select(-value) %>%
   distinct(.) %>%
-  pivot_wider(.,names_from = dat.type, values_from = Mean_Value) %>%
-  filter(!is.na(P50),!is.na(psi.tlp)) %>%
-  ggplot(., aes(x = P50, y = psi.tlp)) + geom_point()+
+  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value, Count)) %>%
+  filter(!is.na(Mean_Value_P50),!is.na(Mean_Value_psi.tlp))
+
+correlation <- cor(a_df$Mean_Value_P50, a_df$Mean_Value_psi.tlp)
+# r = 0.35
+p_value <- cor.test(a_df$Mean_Value_P50, a_df$Mean_Value_psi.tlp)$p.value
+# p = 0.10
+shapiro.test((a_df$Mean_Value_P50))
+# normal, p = 0.3779
+shapiro.test(a_df$Mean_Value_psi.tlp)
+# normal, p = 0.1651
+
+# try for spearman correlation
+correlation <- cor.test(a_df$Mean_Value_P50, a_df$Mean_Value_psi.tlp, type='pearson')$estimate
+# r = 0.35
+p_value <- cor.test(a_df$Mean_Value_P50, a_df$Mean_Value_psi.tlp, type='spearman')$p.value
+# p = 0.10
+# value is IDENTICAL for spearman and pearson
+
+
+  
+a <- ggplot(a_df, aes(x = Mean_Value_P50, y = Mean_Value_psi.tlp)) + #geom_point()+
   geom_smooth(method = "lm", color = "blue") +
+  geom_point(aes(text = paste("<br>Species:",Species_short,
+                              "<br>Country:",Country)))+
   theme_classic()+theme(axis.text.y=element_text(color="black",
                                                  size=10,vjust=0.5,
                                                  hjust=1),
@@ -701,24 +803,60 @@ a<-combined_long %>%
                         axis.ticks=element_line(color="black"),
                         axis.title=element_text(size=10),
                         legend.position="none") + 
-  xlab("") + ylab("Water Potential at TLP (MPa)") 
-# no apparent pattern
-# positive trend, doesn't seem strong.
+  xlab("") + ylab("Water Potential at TLP (MPa)") +
+  annotate("text", x = min(a_df$Mean_Value_P50), y = max(a_df$Mean_Value_psi.tlp), 
+           label = paste("r(s):", round(correlation, 2), "\n", 
+                         "p:", round(p_value, 3), "\n",
+                         "n:", 23),
+           hjust = 1, vjust = 1) +
+  geom_errorbar(
+    aes(ymin = a_df$Mean_Value_psi.tlp - a_df$SD_Value_psi.tlp,
+        ymax = a_df$Mean_Value_psi.tlp + a_df$SD_Value_psi.tlp),
+    width = 0.1,
+    color = "black"
+  ) +
+  geom_errorbarh(
+    aes(xmin = a_df$Mean_Value_P50 - a_df$SD_Value_P50,
+        xmax = a_df$Mean_Value_P50 + a_df$SD_Value_P50),
+    height = 0.1,
+    color = "black"
+  ) 
+# 23 points
 
 # Plot for TLP and P88, IF there are multiple values per species, calculated
 # mean values and plotted those. 
-b<-combined_long %>%
+b_df<-combined_long %>%
   filter(dat.type == "P88" | dat.type == "psi.tlp") %>%
   select(Species_short,dat.type, value) %>%
   group_by(Species_short, dat.type) %>%
   mutate(Mean_Value = mean(value),
-         # SD_Value = sd(value)
+          SD_Value = sd(value),
+         Count = n()
   ) %>%
   select(-value) %>%
   distinct(.) %>%
-  pivot_wider(.,names_from = dat.type, values_from = Mean_Value) %>%
-  filter(!is.na(P88),!is.na(psi.tlp)) %>%
-  ggplot(., aes(x = P88, y = psi.tlp)) + geom_point()+
+  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value,Count)) %>%
+  filter(!is.na(Mean_Value_P88),!is.na(Mean_Value_psi.tlp))
+ 
+
+correlation <- cor(b_df$Mean_Value_P88, b_df$Mean_Value_psi.tlp)
+# r = 0.457
+p_value <- cor.test(b_df$Mean_Value_P88, b_df$Mean_Value_psi.tlp)$p.value
+# p = 0.037
+shapiro.test((b_df$Mean_Value_P88))
+# not normal, p = 0.0.0017
+shapiro.test(b_df$Mean_Value_psi.tlp)
+# normal , p = 0.2637
+
+# try for spearman correlation
+correlation <- cor.test(b_df$Mean_Value_P88, b_df$Mean_Value_psi.tlp, type='pearson')$estimate
+# r = 0.457
+p_value <- cor.test(b_df$Mean_Value_P88, b_df$Mean_Value_psi.tlp, type='spearman')$p.value
+# p = 0.04
+# value is IDENTICAL for spearman and pearson
+
+
+b <- ggplot(b_df, aes(x = Mean_Value_P88, y = Mean_Value_psi.tlp)) + geom_point()+
   geom_smooth(method = "lm", color = "blue") +
   theme_classic()+theme(axis.text.y=element_text(color="black",
                                                  size=10,vjust=0.5,
@@ -726,25 +864,63 @@ b<-combined_long %>%
                         axis.text.x=element_text(color="black",size=10),
                         axis.ticks=element_line(color="black"),
                         axis.title=element_text(size=10),
-                        legend.position="none") + 
-  xlab("") + ylab("") 
+                        legend.position="none") + xlab("") + ylab("") + 
+  annotate("text", x = min(b_df$Mean_Value_P88+1), y = max(b_df$Mean_Value_psi.tlp), 
+                                 label = paste("r(s):", round(correlation, 2), "\n", 
+                                               "p:", round(p_value, 3), "\n",
+                                               "n:", 21),
+                                 hjust = 1, vjust = 1) +
+  geom_errorbar(
+    aes(ymin = b_df$Mean_Value_psi.tlp - b_df$SD_Value_psi.tlp,
+        ymax = b_df$Mean_Value_psi.tlp + b_df$SD_Value_psi.tlp),
+    width = 0.1,
+    color = "black"
+  ) +
+  geom_errorbarh(
+    aes(xmin = b_df$Mean_Value_P88 - b_df$SD_Value_P88,
+        xmax = b_df$Mean_Value_P88 + b_df$SD_Value_P88),
+    height = 0.1,
+    color = "black"
+  ) 
+  
 # no apparent pattern
 # positive trend, doesn't seem strong.
 
 # Plot for FT and P50, IF there are multiple values per species, calculated
 # mean values and plotted those. 
-c<-combined_long %>%
+c_df<-combined_long %>%
   filter(dat.type == "P50" | dat.type == "psi.ft") %>%
   select(Species_short,dat.type, value) %>%
   group_by(Species_short, dat.type) %>%
   mutate(Mean_Value = mean(value),
-         # SD_Value = sd(value)
-  ) %>%
+         SD_Value = sd(value),
+         Count = n(), # Calculate the count of points in each group
+  )%>%
   select(-value) %>%
-  distinct(.) %>%
-  pivot_wider(.,names_from = dat.type, values_from = Mean_Value) %>%
-  filter(!is.na(P50),!is.na(psi.ft)) %>%
-  ggplot(., aes(x = P50, y = psi.ft)) + geom_point()+
+  distinct(.) %>% #733
+  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value, Count)) %>%
+  filter(!is.na(Mean_Value_P50),!is.na(Mean_Value_psi.ft))
+
+
+
+correlation <- cor(c_df$Mean_Value_P50, c_df$Mean_Value_psi.ft)
+# r = 0.50
+p_value <- cor.test(c_df$Mean_Value_P50, c_df$Mean_Value_psi.ft)$p.value
+# p = 0.002
+shapiro.test((c_df$Mean_Value_P50))
+# not normal, p = 0.02979
+shapiro.test(c_df$Mean_Value_psi.ft)
+# not normal, p < 0.001
+
+# try for spearman correlation
+correlation <- cor.test(c_df$Mean_Value_P50, c_df$Mean_Value_psi.ft, type='pearson')$estimate
+# r = 0.50
+p_value <- cor.test(c_df$Mean_Value_P50, c_df$Mean_Value_psi.ft, type='spearman')$p.value
+# p = 0.002
+# value is IDENTICAL for spearman and pearson
+
+
+c <- ggplot(c_df, aes(x = Mean_Value_P50, y = Mean_Value_psi.ft)) + geom_point()+
   geom_smooth(method = "lm", color = "blue") +
   theme_classic()+theme(axis.text.y=element_text(color="black",
                                                  size=10,vjust=0.5,
@@ -753,7 +929,25 @@ c<-combined_long %>%
                         axis.ticks=element_line(color="black"),
                         axis.title=element_text(size=10),
                         legend.position="none") + 
-  xlab("P50 (MPa)") + ylab("Water Potential at Full Turgor (MPa)") 
+  xlab("P50 (MPa)") + ylab("Water Potential at Full Turgor (MPa)") +
+  annotate("text", x = max(c_df$Mean_Value_P50), y = min(c_df$Mean_Value_psi.ft), 
+           label = paste("r(s):", round(correlation, 2), "\n", 
+                         "p:", round(p_value, 3), "\n",
+                         "n:", 36),
+           hjust = 1, vjust = 1) +
+  geom_errorbar(
+    aes(ymin = c_df$Mean_Value_psi.ft - c_df$SD_Value_psi.ft,
+        ymax = c_df$Mean_Value_psi.ft + c_df$SD_Value_psi.ft),
+    width = 0.1,
+    color = "black"
+  ) +
+  geom_errorbarh(
+    aes(xmin = c_df$Mean_Value_P50 - c_df$SD_Value_P50,
+        xmax = c_df$Mean_Value_P50 + c_df$SD_Value_P50),
+    height = 0.1,
+    color = "black"
+  ) 
+
 # no apparent pattern
 # positive trend, doesn't seem strong.
 
@@ -764,27 +958,30 @@ d_df<-combined_long %>%
   select(Species_short,dat.type, value) %>%
   group_by(Species_short, dat.type) %>%
   mutate(Mean_Value = mean(value),
-          SD_Value = sd(value)
+          SD_Value = sd(value),
+         Count = n()  # Calculate the count of points in each group
   ) %>%
   select(-value) %>%
   distinct(.) %>%
-  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value)) %>%
+  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value, Count)) %>%
   filter(!is.na(Mean_Value_P88),!is.na(Mean_Value_psi.ft))
 
+
 correlation <- cor(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft)
-# r = 0.46
+# r = 0.54
 p_value <- cor.test(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft)$p.value
-# p = 0.04
+# p = 0.001
 shapiro.test((d_df$Mean_Value_P88))
 # not normal
 shapiro.test(d_df$Mean_Value_psi.ft)
-# normal
+# not normal
 
 # try for spearman correlation
-correlation <- cor.test(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft, type='spearman')$estimate
-# r = 0.46
+correlation <- cor.test(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft, type='pearson')$estimate
+# r = 0.54
 p_value <- cor.test(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft, type='spearman')$p.value
-# p = 0.04
+# p = 0.001
+# value is IDENTICAL for spearman and pearson
 
 d<-ggplot(d_df, aes(x = Mean_Value_P88, y = Mean_Value_psi.ft)) + geom_point()+
   geom_smooth(method = "lm", color = "blue") +
@@ -796,10 +993,10 @@ d<-ggplot(d_df, aes(x = Mean_Value_P88, y = Mean_Value_psi.ft)) + geom_point()+
                         axis.title=element_text(size=10),
                         legend.position="none") + 
   xlab("P88 (MPa)") + ylab("") +
-  annotate("text", x = min(d_df$Mean_Value_P88+2), y = max(d_df$Mean_Value_psi.ft), 
+  annotate("text", x = max(d_df$Mean_Value_P88), y = min(d_df$Mean_Value_psi.ft), 
            label = paste("r(s):", round(correlation, 2), "\n", 
-                         "p-value:", round(p_value, 3), "\n",
-                         "n:", 21),
+                         "p:", round(p_value, 3), "\n",
+                         "n:", 33),
            hjust = 1, vjust = 1) +
   geom_errorbar(
     aes(ymin = d_df$Mean_Value_psi.ft - d_df$SD_Value_psi.ft,
@@ -813,10 +1010,270 @@ d<-ggplot(d_df, aes(x = Mean_Value_P88, y = Mean_Value_psi.ft)) + geom_point()+
     height = 0.1,
     color = "black"
   ) 
+ggplotly(d)
+
+plot_5<- ggarrange(a, b, c, d, ncol = 2, nrow = 2)
 
 
-ggarrange(a, b, c, d, ncol = 2, nrow = 2)
-# no obvious trends.
+# Filter Out Outliers -----------------------------------------------------
+
+# filter out all values that seem suspicious < -20
+sus <- combined_long %>%
+  filter(value > -20)
+
+# Plot for TLP and P50, IF there are multiple values per species, calculated
+# mean values and plotted those. 
+a_df<-sus %>%
+  filter(dat.type == "P50" | dat.type == "psi.tlp") %>%
+  select(Species_short,dat.type, value) %>%
+  group_by(Species_short, dat.type) %>%
+  mutate(Mean_Value = mean(value),
+         SD_Value = sd(value),
+         Count = n()
+  ) %>%
+  select(-value) %>%
+  distinct(.) %>%
+  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value, Count)) %>%
+  filter(!is.na(Mean_Value_P50),!is.na(Mean_Value_psi.tlp))
+
+correlation <- cor(a_df$Mean_Value_P50, a_df$Mean_Value_psi.tlp)
+# r = 0.35
+p_value <- cor.test(a_df$Mean_Value_P50, a_df$Mean_Value_psi.tlp)$p.value
+# p = 0.10
+shapiro.test((a_df$Mean_Value_P50))
+# normal, p = 0.3779
+shapiro.test(a_df$Mean_Value_psi.tlp)
+# normal, p = 0.1651
+
+# try for spearman correlation
+correlation <- cor.test(a_df$Mean_Value_P50, a_df$Mean_Value_psi.tlp, type='pearson')$estimate
+# r = 0.35
+p_value <- cor.test(a_df$Mean_Value_P50, a_df$Mean_Value_psi.tlp, type='spearman')$p.value
+# p = 0.10
+# value is IDENTICAL for spearman and pearson
+
+
+
+a <- ggplot(a_df, aes(x = Mean_Value_P50, y = Mean_Value_psi.tlp)) + geom_point()+
+  geom_smooth(method = "lm", color = "blue") +
+  #geom_point(aes(text = paste("<br>Species:",Species_short,
+  #                            "<br>Country:",Country)))+
+  theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                 size=10,vjust=0.5,
+                                                 hjust=1),
+                        axis.text.x=element_text(color="black",size=10),
+                        axis.ticks=element_line(color="black"),
+                        axis.title=element_text(size=10),
+                        legend.position="none") + 
+  xlab("") + ylab("Water Potential at TLP (MPa)") +
+  annotate("text", x = min(a_df$Mean_Value_P50), y = max(a_df$Mean_Value_psi.tlp), 
+           label = paste("r(s):", round(correlation, 2), "\n", 
+                         "p:", round(p_value, 3), "\n",
+                         "n:", 23),
+           hjust = 1, vjust = 1) +
+  geom_errorbar(
+    aes(ymin = a_df$Mean_Value_psi.tlp - a_df$SD_Value_psi.tlp,
+        ymax = a_df$Mean_Value_psi.tlp + a_df$SD_Value_psi.tlp),
+    width = 0.1,
+    color = "black"
+  ) +
+  geom_errorbarh(
+    aes(xmin = a_df$Mean_Value_P50 - a_df$SD_Value_P50,
+        xmax = a_df$Mean_Value_P50 + a_df$SD_Value_P50),
+    height = 0.1,
+    color = "black"
+  ) 
+# 23 points
+
+# Plot for TLP and P88, IF there are multiple values per species, calculated
+# mean values and plotted those. 
+b_df<- sus %>%
+  filter(dat.type == "P88" | dat.type == "psi.tlp") %>%
+  select(Species_short,dat.type, value) %>%
+  group_by(Species_short, dat.type) %>%
+  mutate(Mean_Value = mean(value),
+         SD_Value = sd(value),
+         Count = n()
+  ) %>%
+  select(-value) %>%
+  distinct(.) %>%
+  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value,Count)) %>%
+  filter(!is.na(Mean_Value_P88),!is.na(Mean_Value_psi.tlp))
+
+
+correlation <- cor(b_df$Mean_Value_P88, b_df$Mean_Value_psi.tlp)
+# r = 0.457
+p_value <- cor.test(b_df$Mean_Value_P88, b_df$Mean_Value_psi.tlp)$p.value
+# p = 0.037
+shapiro.test((b_df$Mean_Value_P88))
+# not normal, p = 0.0.0017
+shapiro.test(b_df$Mean_Value_psi.tlp)
+# normal , p = 0.2637
+
+# try for spearman correlation
+correlation <- cor.test(b_df$Mean_Value_P88, b_df$Mean_Value_psi.tlp, type='pearson')$estimate
+# r = 0.457
+p_value <- cor.test(b_df$Mean_Value_P88, b_df$Mean_Value_psi.tlp, type='spearman')$p.value
+# p = 0.04
+# value is IDENTICAL for spearman and pearson
+
+
+b <- ggplot(b_df, aes(x = Mean_Value_P88, y = Mean_Value_psi.tlp)) + geom_point()+
+  geom_smooth(method = "lm", color = "blue") +
+  theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                 size=10,vjust=0.5,
+                                                 hjust=1),
+                        axis.text.x=element_text(color="black",size=10),
+                        axis.ticks=element_line(color="black"),
+                        axis.title=element_text(size=10),
+                        legend.position="none") + xlab("") + ylab("") + 
+  annotate("text", x = min(b_df$Mean_Value_P88+1), y = max(b_df$Mean_Value_psi.tlp), 
+           label = paste("r(s):", round(correlation, 2), "\n", 
+                         "p:", round(p_value, 3), "\n",
+                         "n:", 21),
+           hjust = 1, vjust = 1) +
+  geom_errorbar(
+    aes(ymin = b_df$Mean_Value_psi.tlp - b_df$SD_Value_psi.tlp,
+        ymax = b_df$Mean_Value_psi.tlp + b_df$SD_Value_psi.tlp),
+    width = 0.1,
+    color = "black"
+  ) +
+  geom_errorbarh(
+    aes(xmin = b_df$Mean_Value_P88 - b_df$SD_Value_P88,
+        xmax = b_df$Mean_Value_P88 + b_df$SD_Value_P88),
+    height = 0.1,
+    color = "black"
+  ) 
+
+# no apparent pattern
+# positive trend, doesn't seem strong.
+
+# Plot for FT and P50, IF there are multiple values per species, calculated
+# mean values and plotted those. 
+c_df<- sus %>%
+  filter(dat.type == "P50" | dat.type == "psi.ft") %>%
+  select(Species_short,dat.type, value) %>%
+  group_by(Species_short, dat.type) %>%
+  mutate(Mean_Value = mean(value),
+         SD_Value = sd(value),
+         Count = n(), # Calculate the count of points in each group
+  )%>%
+  select(-value) %>%
+  distinct(.) %>% #733
+  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value, Count)) %>%
+  filter(!is.na(Mean_Value_P50),!is.na(Mean_Value_psi.ft))
+
+
+
+correlation <- cor(c_df$Mean_Value_P50, c_df$Mean_Value_psi.ft)
+# r = 0.44
+p_value <- cor.test(c_df$Mean_Value_P50, c_df$Mean_Value_psi.ft)$p.value
+# p = 0.008
+shapiro.test((c_df$Mean_Value_P50))
+# not normal, p = 0.02979
+shapiro.test(c_df$Mean_Value_psi.ft)
+# not normal, p < 0.001
+
+# try for spearman correlation
+correlation <- cor.test(c_df$Mean_Value_P50, c_df$Mean_Value_psi.ft, type='pearson')$estimate
+# r = 0.50
+p_value <- cor.test(c_df$Mean_Value_P50, c_df$Mean_Value_psi.ft, type='spearman')$p.value
+# p = 0.002
+# value is IDENTICAL for spearman and pearson
+
+
+c <- ggplot(c_df, aes(x = Mean_Value_P50, y = Mean_Value_psi.ft)) + geom_point()+
+  geom_smooth(method = "lm", color = "blue") +
+  theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                 size=10,vjust=0.5,
+                                                 hjust=1),
+                        axis.text.x=element_text(color="black",size=10),
+                        axis.ticks=element_line(color="black"),
+                        axis.title=element_text(size=10),
+                        legend.position="none") + 
+  xlab("P50 (MPa)") + ylab("Water Potential at Full Turgor (MPa)") +
+  annotate("text", x = max(c_df$Mean_Value_P50), y = min(c_df$Mean_Value_psi.ft), 
+           label = paste("r(s):", round(correlation, 2), "\n", 
+                         "p:", round(p_value, 3), "\n",
+                         "n:", 36),
+           hjust = 1, vjust = 1) +
+  geom_errorbar(
+    aes(ymin = c_df$Mean_Value_psi.ft - c_df$SD_Value_psi.ft,
+        ymax = c_df$Mean_Value_psi.ft + c_df$SD_Value_psi.ft),
+    width = 0.1,
+    color = "black"
+  ) +
+  geom_errorbarh(
+    aes(xmin = c_df$Mean_Value_P50 - c_df$SD_Value_P50,
+        xmax = c_df$Mean_Value_P50 + c_df$SD_Value_P50),
+    height = 0.1,
+    color = "black"
+  ) 
+
+
+# Plot for FT and P88, IF there are multiple values per species, calculated
+# mean values and plotted those. 
+d_df<- sus %>%
+  filter(dat.type == "P88" | dat.type == "psi.ft") %>%
+  select(Species_short,dat.type, value) %>%
+  group_by(Species_short, dat.type) %>%
+  mutate(Mean_Value = mean(value),
+         SD_Value = sd(value),
+         Count = n()  # Calculate the count of points in each group
+  ) %>%
+  select(-value) %>%
+  distinct(.) %>%
+  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value, Count)) %>%
+  filter(!is.na(Mean_Value_P88),!is.na(Mean_Value_psi.ft))
+
+
+correlation <- cor(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft)
+# r = 0.48
+p_value <- cor.test(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft)$p.value
+# p = 0.005
+shapiro.test((d_df$Mean_Value_P88))
+# not normal
+shapiro.test(d_df$Mean_Value_psi.ft)
+# not normal
+
+# try for spearman correlation
+correlation <- cor.test(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft, type='pearson')$estimate
+# r = 0.54
+p_value <- cor.test(d_df$Mean_Value_P88, d_df$Mean_Value_psi.ft, type='spearman')$p.value
+# p = 0.001
+# value is IDENTICAL for spearman and pearson
+
+d<-ggplot(d_df, aes(x = Mean_Value_P88, y = Mean_Value_psi.ft)) + geom_point()+
+  geom_smooth(method = "lm", color = "blue") +
+  theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                 size=10,vjust=0.5,
+                                                 hjust=1),
+                        axis.text.x=element_text(color="black",size=10),
+                        axis.ticks=element_line(color="black"),
+                        axis.title=element_text(size=10),
+                        legend.position="none") + 
+  xlab("P88 (MPa)") + ylab("") +
+  annotate("text", x = max(d_df$Mean_Value_P88), y = min(d_df$Mean_Value_psi.ft), 
+           label = paste("r(s):", round(correlation, 2), "\n", 
+                         "p:", round(p_value, 3), "\n",
+                         "n:", 33),
+           hjust = 1, vjust = 1) +
+  geom_errorbar(
+    aes(ymin = d_df$Mean_Value_psi.ft - d_df$SD_Value_psi.ft,
+        ymax = d_df$Mean_Value_psi.ft + d_df$SD_Value_psi.ft),
+    width = 0.1,
+    color = "black"
+  ) +
+  geom_errorbarh(
+    aes(xmin = d_df$Mean_Value_P88 - d_df$SD_Value_P88,
+        xmax = d_df$Mean_Value_P88 + d_df$SD_Value_P88),
+    height = 0.1,
+    color = "black"
+  ) 
+ggplotly(d)
+
+plot_5<- ggarrange(a, b, c, d, ncol = 2, nrow = 2)
+
 
 
 # ERA5 Data ---------------------------------------------------------------
