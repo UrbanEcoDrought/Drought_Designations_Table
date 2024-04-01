@@ -88,12 +88,12 @@ compiled_lon <- compiled %>%
 #  mutate(Dat.Type = if_else(Dat.Type == "Leaf_turgor_loss_pt_MPa", "Ptlp", "Pft")) # change names in data type
 
 hirons<-jakedat%>%
-  left_join(compiled,by=c("Species","Species_short","Cultivar"))%>%
+  full_join(compiled,by=c("Species","Species_short","Cultivar"))%>%
   rename(Source_Hirons = Source.x,Psi_tlp_Hirons = psi.tlp.x, Psi_ft_Hirons = psi.ft.x,
          Source_Sjoman = Source.y, Psi_ft_Sjoman = psi.ft.y,
          Psi_tlp_Sjoman = psi.tlp.y, Refernce_Sjoman = Reference)%>%
-  left_join(coords,by=c("Latitude","Longitude","Country","garden"))
-#150 obs
+  full_join(coords,by=c("Latitude","Longitude","Country","garden"))
+#217 obs
 
 # make into one long DF
 # Because all of this data is from Andy Hirons, there are duplicated rows across the two
@@ -102,7 +102,7 @@ hirons<-jakedat%>%
 # As much origin information was retained by combining the Source and Reference columns to reflect
 # where the infomration came from.
 
-hirons_lon <- left_join(jakedat_lon, compiled_lon, by = c("Species", "dat.type","value")) %>%
+hirons_lon <- full_join(jakedat_lon, compiled_lon, by = c("Species", "dat.type","value")) %>%
   mutate(
     Exposition = coalesce(Exposition.x, Exposition.y),
     Country = coalesce(Country.x, Country.y),
@@ -115,10 +115,11 @@ hirons_lon <- left_join(jakedat_lon, compiled_lon, by = c("Species", "dat.type",
     Source_file = coalesce(Source_file.x, Source_file.y),
     Source = paste(Source.x, Source.y, sep = ", "),
     Reference = paste(Reference.x, Reference.y, sep = ", ")
-  ) %>%
+  ) #%>%
   select(-Exposition.x, -Country.x, -Latitude.x, -Longitude.x, -Exposition.y, -Country.y, -Latitude.y, -Longitude.y,
          -Maturity.x, -Maturity.y, -Species_short.x, -Species_short.y, -Comments.x, -Comments.y, -Cultivar.x, -Cultivar.y, -Reference.x,
          -Reference.y, -Source.x, -Source.y, -Source_file.x, -Source_file.y)
+# 383
 
 # Google Sheets -----------------------------------------------------------
 desig<-data.frame(read_sheet(ss="https://docs.google.com/spreadsheets/d/1Ap2zxfzQ2tA7Vw2YFKWG5WlASvh_DakGJGc-i07YDOo/edit#gid=2107989582"))
