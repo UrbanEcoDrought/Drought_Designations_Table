@@ -137,7 +137,8 @@ desig_list<-data.frame(desig_list[-c(158,160:162,176:179),])
 
 #Adding in TRY Data pull 31506 from Jan 2024 request.
 
-trydat_2024 <- fread("31506.txt", header = T, sep = "\t", dec = ".", quote = "", data.table = T,
+trydat_2024 <- fread("31506.txt", header = T, sep = "\t", dec = ".",
+                     quote = "", data.table = T,
                      encoding = "UTF-8")
 names(trydat_2024)
 unique(trydat_2024$DataName)
@@ -145,7 +146,7 @@ str(trydat_2024)
 
 ## Get metadata associated with any points from the trydata
 try24_met<-trydat_2024 %>%
-  select("AccSpeciesName","DatasetID","DataName","OrigValueStr") %>%
+  select("AccSpeciesName","DatasetID","DataName","OrigValueStr","OrigUnitStr") %>%
   filter(DataName %like% "Location Country" | DataName %like% "Latitude" | DataName %like% "Longitude" |
            DataName %like% "Plant developmental status" | DataName %like% "Origin of seed material" |
            DataName %like%  "Reference/ source" | DataName %like% "Location / Site Name") #%>%
@@ -160,7 +161,8 @@ trydat_2024 %>%
   dplyr::filter(n > 1L) 
 
 subset_l <- trydat_2024 %>%
-  select("AccSpeciesName","DatasetID","DataID","ObservationID","DataName","OrigValueStr", "Reference") %>%
+  select("AccSpeciesName","DatasetID","DataID","ObservationID","DataName","OrigValueStr", "Reference",
+         "OrigUnitStr") %>%
   filter(DataName %ilike% "turgor loss point" | DataName %ilike% "full turgor") %>%
   filter(OrigValueStr != 2016) %>%
   mutate(DataName = case_when(
@@ -168,8 +170,12 @@ subset_l <- trydat_2024 %>%
     TRUE ~ DataName),
     DataName = case_when(DataName == "Leaf osmotic potential at full turgor" ~ "psi.ft",
     TRUE ~ DataName),
-    Species_short = AccSpeciesName) %>%
-  rename(Species= "AccSpeciesName")
+    Species_short = AccSpeciesName, OrigValueStr = as.numeric(OrigValueStr)) %>%
+  rename(Species= "AccSpeciesName") 
+
+subset_l <- subset_l %>%
+mutate(OrigValueStr = ifelse(subset_l$OrigUnitStr == "-MPa", (subset_l$OrigValueStr*-1),
+                         subset_l$OrigValueStr))
 # 1,102 observations of 4 vars  
 
 strings_to_match24 <- c("Location Region","Location Name","Location Country","Location Site ID","Reference",
@@ -196,7 +202,7 @@ try_obs24<-trydat_2024 %>%
   select(ObservationID)%>% distinct(ObservationID)%>%
   inner_join(.,trydat_2024, by = "ObservationID")%>% 
   filter(grepl(paste(strings_to_match24, collapse = "|"), DataName))%>%
-  select(ObservationID, DatasetID,DataName,OrigValueStr,SpeciesName)%>%
+  select(ObservationID, DatasetID,DataName,OrigValueStr,SpeciesName,OrigUnitStr)%>%
   pivot_wider(names_from=DataName,values_from=OrigValueStr) %>%
   rename(Species_short = "SpeciesName") #%>%
   #mutate(Latitude = ifelse(Latitude == "41� 20' 42''", "41.345", Latitude),
@@ -751,9 +757,11 @@ combined_long <- bind_rows(choat_lon, hirons_lon, subset_l)
 
 summary <- combined_long %>%
   group_by(Species_short, dat.type) %>%
-  summarize(Count = n())
+  summarize(Count = n()) %>%
+  pivot_wider(names_from = dat.type, values_from = Count)
   
-
+summary <- summary %>%
+  mutate(Table = if_else(Species_short %in% desig$Species, "X", ""))
 
 
 
@@ -794,8 +802,7 @@ p_value <- cor.test(a_df$Mean_Value_P50, a_df$Mean_Value_psi.tlp, type='spearman
   
 a <- ggplot(a_df, aes(x = Mean_Value_P50, y = Mean_Value_psi.tlp)) + #geom_point()+
   geom_smooth(method = "lm", color = "blue") +
-  geom_point(aes(text = paste("<br>Species:",Species_short,
-                              "<br>Country:",Country)))+
+  geom_point()+
   theme_classic()+theme(axis.text.y=element_text(color="black",
                                                  size=10,vjust=0.5,
                                                  hjust=1),
@@ -1010,16 +1017,16 @@ d<-ggplot(d_df, aes(x = Mean_Value_P88, y = Mean_Value_psi.ft)) + geom_point()+
     height = 0.1,
     color = "black"
   ) 
-ggplotly(d)
 
-plot_5<- ggarrange(a, b, c, d, ncol = 2, nrow = 2)
+ggarrange(a, b, c, d, ncol = 2, nrow = 2)
 
 
 # Filter Out Outliers -----------------------------------------------------
 
 # filter out all values that seem suspicious < -20
 sus <- combined_long %>%
-  filter(value > -20)
+  filter(value > -20 &
+           Reference != "Ogaya, R. and J. Penuelas. 2003. Comparative field study of Quercus ilex and Phillyrea latifolia: photosynthetic response to experimental drought conditions. Environmental and Experimental Botany 50:137-148.")
 
 # Plot for TLP and P50, IF there are multiple values per species, calculated
 # mean values and plotted those. 
@@ -1192,10 +1199,10 @@ c <- ggplot(c_df, aes(x = Mean_Value_P50, y = Mean_Value_psi.ft)) + geom_point()
                         axis.title=element_text(size=10),
                         legend.position="none") + 
   xlab("P50 (MPa)") + ylab("Water Potential at Full Turgor (MPa)") +
-  annotate("text", x = max(c_df$Mean_Value_P50), y = min(c_df$Mean_Value_psi.ft), 
+  annotate("text", x = min(c_df$Mean_Value_P50), y = max(c_df$Mean_Value_psi.ft), 
            label = paste("r(s):", round(correlation, 2), "\n", 
                          "p:", round(p_value, 3), "\n",
-                         "n:", 36),
+                         "n:", 34),
            hjust = 1, vjust = 1) +
   geom_errorbar(
     aes(ymin = c_df$Mean_Value_psi.ft - c_df$SD_Value_psi.ft,
@@ -1253,10 +1260,10 @@ d<-ggplot(d_df, aes(x = Mean_Value_P88, y = Mean_Value_psi.ft)) + geom_point()+
                         axis.title=element_text(size=10),
                         legend.position="none") + 
   xlab("P88 (MPa)") + ylab("") +
-  annotate("text", x = max(d_df$Mean_Value_P88), y = min(d_df$Mean_Value_psi.ft), 
+  annotate("text", x = min(d_df$Mean_Value_P88+1), y = max(d_df$Mean_Value_psi.ft), 
            label = paste("r(s):", round(correlation, 2), "\n", 
                          "p:", round(p_value, 3), "\n",
-                         "n:", 33),
+                         "n:", 31),
            hjust = 1, vjust = 1) +
   geom_errorbar(
     aes(ymin = d_df$Mean_Value_psi.ft - d_df$SD_Value_psi.ft,
@@ -1270,9 +1277,115 @@ d<-ggplot(d_df, aes(x = Mean_Value_P88, y = Mean_Value_psi.ft)) + geom_point()+
     height = 0.1,
     color = "black"
   ) 
-ggplotly(d)
 
-plot_5<- ggarrange(a, b, c, d, ncol = 2, nrow = 2)
+
+ggarrange(a, b, c, d, ncol = 2, nrow = 2)
+
+# Talked with Luke on 3/29: 
+# Removed data set from Ogaya from try data set because many of the species are only found in the
+# Mediterranean and were dragging our data EXTREMELY negative (< - 20)
+
+# Even with those removed, the data still does not show a significant relationship
+# between P88 or P50 and PSI TLP/FT. 
+
+# Next steps. Calculate TLP from the FT values where needed. Intersect the species
+# list with the drought designations table and populate columns where data exists. 
+
+
+
+# Calculating PSI TLP from PSI FT -----------------------------------------
+
+# Using the equation Andy Hirons used, we are calculating PSI TLP from PSI FT
+
+turgorpt <- sus %>%
+  filter(dat.type == "psi.tlp" | dat.type == "psi.ft") %>% # 1322 observations 
+  select(Species_short, dat.type, value, Source, Reference) #%>%
+  #pivot_wider(names_from = dat.type, values_from = value)
+
+# figure out what species I have psi.ft values for and not tlp values.
+df_calc <- turgorpt %>%
+  group_by(Species_short, dat.type) %>%
+  summarise(num_values = n()) %>%
+  pivot_wider(names_from = dat.type, values_from = num_values) %>%
+  filter(is.na(psi.tlp)) %>%
+  select(Species_short) %>% # 40 species with ft and not tlp
+  inner_join(., sus, by = "Species_short") %>%
+  filter(dat.type == "psi.ft") #521
+
+tlp_dat <- df_calc %>%
+  rename(psi.ft = value) %>%
+  select(-dat.type) %>%
+  mutate(psi.tlp = -0.2554 + (1.1243 * psi.ft)) %>% # Calculation from Hirons et al 2020
+  pivot_longer(cols = -c(1:10,12:19), 
+               names_to = "dat.type",
+               values_to = "value") 
+tlp_dat <- tlp_dat %>%
+  filter(dat.type == "psi.tlp")
+# long data frame with TLP and FT values and corresponding metadata.
+# need to combine this back with the "sus" data frame
+# i think it worked
+
+turgor_dat <- bind_rows(tlp_dat, sus) # bind rows to add back in new calculated data
+# 4198 rows
+turgor_dat <- turgor_dat %>%
+  distinct() #
+#4183
+
+# double check what is duplicated.
+duplicated_rows <- duplicated(turgor_dat)
+# Select duplicated rows from 'sus'
+duplicated_sus <- turgor_dat[duplicated_rows, ]
+
+
+desig_table <- desig_list %>%
+  rename(Species_short = Species) %>%
+  left_join(.,turgor_dat) #%>% # 1577 observations
+#  filter(dat.type == "psi.tlp" | dat.type == "psi.ft") # 1147 obs
+
+sum_desig_table<- desig_table %>%
+  select(Species_short,dat.type, value) %>%
+  group_by(Species_short, dat.type) %>%
+  mutate(Mean_Value = round(mean(value),2),
+         SD_Value = round(sd(value),2),
+         Count = n()  # Calculate the count of points in each group
+  ) %>%
+  select(-value) %>%
+  distinct(.) %>% #733
+  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value, Count)) %>%
+  select(-Mean_Value_NA, -SD_Value_NA, -Count_NA) %>%
+  mutate(P50 = paste(Mean_Value_P50, "(", SD_Value_P50, ")"),
+         P88 = paste(Mean_Value_P88, "(", SD_Value_P88, ")"),
+         psi.tlp = paste(Mean_Value_psi.tlp, "(", SD_Value_psi.tlp, ")"),
+         psi.ft = paste(Mean_Value_psi.ft, "(", SD_Value_psi.ft, ")")) %>%
+  select(-2:-9)
+
+sum_desig_table$P50 <- ifelse(sum_desig_table$P50 == "NA ( NA )", NA, sum_desig_table$P50)
+sum_desig_table$P88 <- ifelse(sum_desig_table$P88 == "NA ( NA )", NA, sum_desig_table$P88)
+sum_desig_table$psi.tlp <- ifelse(sum_desig_table$psi.tlp == "NA ( NA )", NA, sum_desig_table$psi.tlp)
+sum_desig_table$psi.ft <- ifelse(sum_desig_table$psi.ft == "NA ( NA )", NA, sum_desig_table$psi.ft)
+
+# if !is.na(Mean), then do this, if it is, put NA. 
+
+# 171 obs. Matches the # of species in the desig list.
+
+# TDAG associations for Psi turgor loss point
+# Sensitive: > -2.5 MPa
+# Moderately Sensitive -2.5 MPa to -3 MPa
+# Moderately Tolerant -3 MPa to -3.5 MPa
+# Tolerant < -3.5 MPa
+
+sum_desig_table$TDAG_UED <- ifelse(sum_desig_table$psi.tlp > -2.5, "Sensitive",
+                                   ifelse(sum_desig_table$psi.tlp < -2.5 | sum_desig_table$psi.tlp > -3, "Moderately Sensitive",
+                                          ifelse(sum_desig_table$psi.tlp < -3 | sum_desig_table$psi.tlp > -3.5, "Moderately Tolerant",
+                                                 ifelse(sum_desig_table$psi.tlp < -3.5, "Tolerant",NA))))
+
+
+desig_table_com <- sum_desig_table %>%
+  rename(Species = Species_short) %>%
+  right_join(desig)
+
+write.csv(desig_table_com,"droughtdesignations_table_2024_04.csv", row.names = F)
+
 
 
 
