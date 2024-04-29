@@ -275,7 +275,7 @@ workdata <- rtry_remove_dup(workdata)
 num_traits <- rtry_select_row(workdata, complete.cases(TraitID) & complete.cases(OrigValueStr))
 # dim:   5804 17 
 num_traits <- rtry_select_col(num_traits, ObservationID, AccSpeciesID, AccSpeciesName, TraitID, TraitName, StdValue, UnitName,
-                              OriglName, OrigValueStr)
+                              OriglName, OrigValueStr, OrigObsDataID)
 # dim:   5804 8 
 # col:   ObservationID AccSpeciesID AccSpeciesName TraitID TraitName StdValue UnitName 
 
@@ -297,6 +297,7 @@ num_traits_organ <- rtry_join_left(num_traits_georef, workdata_organ, baseOn = O
 workdata_1 <- rtry_join_left(num_traits_organ, workdata_ref, baseOn = ObservationID)
 workdata_2 <- rtry_join_left(workdata_1, workdata_mat, baseOn = ObservationID)
 workdata_2 <- rtry_join_left(workdata_2, workdata_country, baseOn = ObservationID)
+workdata_2 <- rtry_remove_dup(workdata_2)
 
 workdata_2 <- workdata_2 %>%
   rename(Plant_organ = "Plant organ measured")
@@ -331,6 +332,9 @@ workdata_2 <- workdata_2 %>%
          value = "OrigValueStr",
          Source = "Reference / source",
          Maturity = "Plant developmental status / plant age / maturity / plant life stage")
+# 5084 obs
+
+workdata_2 <- rtry_remove_dup(workdata_2)
 
 # Choat et al. 2012 data --------------------------------------------------
 
@@ -394,7 +398,7 @@ for (Species_short in unique(c(hirons_lon$Species_short, choat$Species_short, wo
 result_df <- result_df[-1, ]
 
 sum(rowSums(result_df[, c("Listed_with_hirons_lon", "Listed_with_choat", "Listed_with_workdata_2", "Listed_with_bartlett")] == "X") == 4)
-# 6 species present in all 4 datasets.
+# 5 species present in all 4 datasets.
 
 
 # 2024 Data Combination - HIRONS - Ptlp and Pft---------------------------------------------------
@@ -732,15 +736,12 @@ see<-choat_des %>%
 
 
 # make choat_try long
-choat_lon <-choat_try %>%
-  select("Species", "Location_try", "Reference","Latitude",
-         "Longitude", "Country", "Reference", "Comments", "Source",
-         "Genus","Species_short", "P50", "P88", "Organ") %>%
-  pivot_longer(cols = -c(Species, Location_try, Reference, Latitude,
-                         Longitude, Country, Genus, Source, Species_short,
-                         Reference, Comments, Organ),
+choat_lon <-choat %>%
+  pivot_longer(cols = -c(Species, Location, Reference, Latitude,
+                         Longitude, Country, Source, Species_short,
+                         Comments, Plant_organ, Last),
                names_to = "dat.type", values_to = "value") %>%
-  rename(Exposition = Location_try)%>%
+  rename(Exposition = Location)%>%
   filter(!is.na(value))
 
 # We want to see what data we have for what species.
@@ -755,9 +756,13 @@ choat_lon <-choat_try %>%
 hirons_lon <- hirons_lon %>%
   mutate(Plant_organ = "P")
 
+workdata_2 <- workdata_2 %>%
+  rename(Species = AccSpeciesName,
+         Reference = Source) %>%
+  mutate(Source = "TRY data")
 # combine rows
 combined_long <- bind_rows(hirons_lon, workdata_2)
-# 3845 obs
+# 6187
 
 names(combined_long)
 bartlett <- bartlett %>%
@@ -767,8 +772,11 @@ bartlett <- bartlett %>%
                values_to = "value") %>%
   mutate(Plant_organ = "P")
 
-combined_long <- bind_rows(choat_lon, bartlett, combined_long) # 4061  
+combined_long <- bind_rows(choat, bartlett, combined_long) # 7373  
 # include on plot: R, P, N. 
+
+combined_long <- combined_long %>% mutate(value = round(value, 2),
+                                          Last = word(Reference, 1, sep = " "))
 
 summary <- combined_long %>%
   group_by(Species_short, dat.type) %>%
@@ -779,6 +787,13 @@ summary <- combined_long %>%
 summary <- summary %>%
   mutate(Table = if_else(Species_short %in% desig$Species, "X", ""))
 
+# remove duplicates
+
+combined_long<- combined_long [!duplicated(combined_long[c("Species",
+                                                             "Last",
+                                                             "dat.type",
+                                                             "value")]),]
+# 5863
 
 # Next steps. Calculate TLP from the FT values where needed. Intersect the species
 # list with the drought designations table and populate columns where data exists. 
