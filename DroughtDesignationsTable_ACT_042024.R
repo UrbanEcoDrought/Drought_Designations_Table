@@ -292,8 +292,8 @@ workdata_country <- rtry_select_anc(workdata, 1412)
 
 # To merge the extracted ancillary data with the numerical traits
 # Merge the relevant data frames based on the ObservationID using rtry_join_left (left join)
-num_traits_georef <- rtry_join_left(num_traits, workdata_georef, baseOn = ObservationID)
-num_traits_organ <- rtry_join_left(num_traits_georef, workdata_organ, baseOn = ObservationID)
+# num_traits_georef <- rtry_join_left(num_traits, workdata_georef, baseOn = ObservationID)
+num_traits_organ <- rtry_join_left(num_traits, workdata_organ, baseOn = ObservationID)
 workdata_1 <- rtry_join_left(num_traits_organ, workdata_ref, baseOn = ObservationID)
 workdata_2 <- rtry_join_left(workdata_1, workdata_mat, baseOn = ObservationID)
 workdata_2 <- rtry_join_left(workdata_2, workdata_country, baseOn = ObservationID)
@@ -332,7 +332,7 @@ workdata_2 <- workdata_2 %>%
          value = "OrigValueStr",
          Source = "Reference / source",
          Maturity = "Plant developmental status / plant age / maturity / plant life stage")
-# 5084 obs
+# 5804 obs
 
 workdata_2 <- rtry_remove_dup(workdata_2)
 
@@ -793,7 +793,7 @@ combined_long<- combined_long [!duplicated(combined_long[c("Species",
                                                              "Last",
                                                              "dat.type",
                                                              "value")]),]
-# 5863
+# 7373
 
 # Next steps. Calculate TLP from the FT values where needed. Intersect the species
 # list with the drought designations table and populate columns where data exists. 
@@ -804,13 +804,14 @@ combined_long<- combined_long [!duplicated(combined_long[c("Species",
 
 # Using the equation Andy Hirons used, we are calculating PSI TLP from PSI FT
 sus <- combined_long %>%
-  filter(value > -20 &
-           Reference != "Ogaya, R. and J. Penuelas. 2003. Comparative field study of Quercus ilex and Phillyrea latifolia: photosynthetic response to experimental drought conditions. Environmental and Experimental Botany 50:137-148.")
+  filter(value > -20) # &
+#           Reference != "Ogaya, R. and J. Penuelas. 2003. Comparative field study of Quercus ilex and Phillyrea latifolia: photosynthetic response to experimental drought conditions. Environmental and Experimental Botany 50:137-148.")
+# 4806
 
 turgorpt <- sus %>%
   filter(dat.type == "psi.tlp" | dat.type == "psi.ft") %>% 
-  select(Species_short, dat.type, value, Source, Reference, Organ) #%>%
-# 1877 obs
+  select(Species_short, dat.type, value, Source, Reference,Plant_organ) #%>%
+# 988
 #pivot_wider(names_from = dat.type, values_from = value)
 
 # figure out what species I have psi.ft values for and not tlp values.
@@ -821,27 +822,27 @@ df_calc <- turgorpt %>%
   filter(is.na(psi.tlp)) %>%
   select(Species_short) %>% # 39 species with ft and not tlp
   inner_join(., combined_long, by = "Species_short") %>%
-  filter(dat.type == "psi.ft") #588
+  filter(dat.type == "psi.ft") #61
 
 tlp_dat <- df_calc %>%
   rename(psi.ft = value) %>%
   select(-dat.type) %>%
   mutate(psi.tlp = -0.2554 + (1.1243 * psi.ft)) #%>% # Calculation from Hirons et al 2020
 tlp_dat<- tlp_dat %>%
-  pivot_longer(cols = -c(1:11,13:20), 
+  pivot_longer(cols = -c(1:11,13:25), 
                names_to = "dat.type",
                values_to = "value") 
 tlp_dat <- tlp_dat %>%
-  filter(dat.type == "psi.tlp") # 548
+  filter(dat.type == "psi.tlp") # 61
 # long data frame with TLP and FT values and corresponding metadata.
 # need to combine this back with the "sus" data frame
 # i think it worked
 
 turgor_dat <- bind_rows(tlp_dat, combined_long) # bind rows to add back in new calculated data
-# 4609 rows
+# 5924rows
 turgor_dat <- turgor_dat %>%
   distinct() #
-#4535
+# 6050
 
 # double check what is duplicated.
 duplicated_rows <- duplicated(turgor_dat)
@@ -854,18 +855,19 @@ elms <- combined_long %>%
 desig_table <- desig_list %>%
   rename(Species_short = Species) %>%
   left_join(.,turgor_dat) #%>% # 1561 observations
-#  filter(dat.type == "psi.tlp" | dat.type == "psi.ft") # 1147 obs
+#  filter(dat.type == "psi.tlp" | dat.type == "psi.ft") # 1155 obs
 
 # get elm data back in
 desig_table <- bind_rows(desig_table, elms)
 
 #get rid of duplicates
 desig_table <- desig_table %>% filter(!duplicated(desig_table))
-#1601
+#1070
 # calculate mean and SD for each species based on data type
 sum_desig_table<- desig_table %>%
-  select(Species_short,dat.type, Organ, value) %>%
-  group_by(Species_short, dat.type, Organ) %>%
+  filter(Plant_organ == "P" | Plant_organ == "L" | is.na(Plant_organ)) %>%
+  select(Species_short,dat.type, value) %>%
+  group_by(Species_short, dat.type) %>%
   mutate(Mean_Value = round(mean(value),2),
          SD_Value = round(sd(value),2),
          Count = n()  # Calculate the count of points in each group
@@ -873,7 +875,8 @@ sum_desig_table<- desig_table %>%
   select(-value) %>%
   distinct(.) %>% #733
   pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value, Count)) %>%
-  select(-Mean_Value_NA, -SD_Value_NA, -Count_NA)
+  select(-Mean_Value_NA, -SD_Value_NA, -Count_NA) 
+#190
 
 # TDAG associations for Psi turgor loss point
 # Sensitive: > -2.5 MPa
@@ -893,7 +896,7 @@ sum_desig_table <- sum_desig_table %>%
          P88 = paste(Mean_Value_P88, "(", SD_Value_P88, ")"),
          psi.tlp = paste(Mean_Value_psi.tlp, "(", SD_Value_psi.tlp, ")"),
          psi.ft = paste(Mean_Value_psi.ft, "(", SD_Value_psi.ft, ")")) %>%
-  select(-3:-10)
+  select(-2:-11)
 
 # get rid of the weird  NA ( NA ) 
 sum_desig_table$P50 <- ifelse(sum_desig_table$P50 == "NA ( NA )", NA, sum_desig_table$P50)
@@ -915,9 +918,10 @@ desig_table_com <- sum_desig_table %>%
 # bring back elm data
 desig_table_com <- desig_table_com %>%
   bind_rows(., elm)
+# 199
 
 # write out csv file for the team
- write.csv(desig_table_com,"droughtdesignations_table_2024_04_09.csv", row.names = F)
+ write.csv(desig_table_com,"droughtdesignations_table_2024_03May.csv", row.names = F)
 
 
 
