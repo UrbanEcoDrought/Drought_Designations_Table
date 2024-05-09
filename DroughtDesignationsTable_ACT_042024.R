@@ -564,171 +564,6 @@ ggplotly(ggplot(tlp,aes(x=reorder(Genus, value), y= value))+
                                        "<br>Country:",Country),
                           col=Exposition)))
 
-# Summary of P50 and P88 ----------------------------------
-
-#choat_des<-choat_try%>%
-#  left_join(desig_list, by = "Species")
-
-choat_try$Table <- ""
-
-# Loop through each row in test
-for (i in 1:nrow(choat_try)) {
-  # Check if the Species names in the test df match any of the 
-  # species names in the drought designation table
-  if (choat_try$Species[i] %in% desig_list$Species_new) {
-    choat_try$Table[i] <- "X"  # Mark 'X' in Table if there's a match
-  }
-}
-#1424
-
-# Include all of the elms
-choat_try<-choat_try%>%
-  #  mutate(Table=ifelse("Ulmus" %in% Species_new,Table=="X",Table))
-  mutate(Table = ifelse(grepl("ulmus", Species, ignore.case = TRUE), "X", Table))%>%
-  mutate(Genus = str_split(Species, " ", simplify = TRUE)[, 1]) %>%
-  mutate(Genus = str_trim(Genus))%>%
-  left_join(family,by="Genus")
-  
-
-choat_des<- choat_try %>%
-  filter(Table=="X") %>%
-  left_join(coords,by=c("Latitude","Longitude","Country"))
-#202 
-
-choat_try %>%
-  filter(!is.na(P50))%>%
-  summarise(NumSpecies=length(unique(Species)),
-            NumGenera = length(unique(Genus)),
-            NumFamily = length(unique(Family)))
-# 562 unique species 
-# 289 unique genera
-# 100 unique Family
-
-choat_try %>%
-  filter(!is.na(P88))%>%
-  summarise(NumSpecies=length(unique(Species)),
-            NumGenera = length(unique(Genus)),
-            NumFamily = length(unique(Family)))
-# 468 unique species with P88 data
-# 252 unique genera with P88 data
-# 93 families
-
-choat_des %>%
-  filter(!is.na(P50))%>%
-  summarise(NumSpecies=length(unique(Species)),
-            NumGenera = length(unique(Genus)),
-            NumFamily = length(unique(Family)))
-# 43 unique species from designation list with P50 data
-# 31 unique genera from designation list with P50 data
-# 18 unique families from designation list with P50 data
-
-choat_des %>%
-  filter(!is.na(P88))%>%
-  summarise(NumSpecies=length(unique(Species)),
-            NumGenera = length(unique(Genus)),
-            NumFamily = length(unique(Family)))
-# 37 unique species from designation list with P88 data
-# 26 unique genera from designation list with P88 data
-# 14 unique families from designation list with P88 data
-
-
-# Graphing the Ptlp data
-
-names(choat_des)
-head(choat_des)
-
-p_50<-choat_des %>%
-  select(Species,Country,P50)%>%
-  distinct(.)%>%
-  group_by(Species)%>%
-  summarise(Count = length(P50),
-            Mean_TLP=mean(P50),
-            SD_TLP=sd(P50),
-            SE_TLP= sd(P50) / sqrt(n())) %>%
-  mutate(Mean_TLP = round(Mean_TLP, 2),SD_TLP = round(SD_TLP,2),
-         SE_TLP=round(SE_TLP,2))%>%
-  left_join(choat_des)#%>%
-  #filter(Count>1)
-
-#choat_try %>%
- # select(Genus)%>%
-  #filter(!duplicated(Genus))#%>%
- # write.csv("Genus_Choat.csv",row.names=F)
-
-
-
-
-length(unique(p_50$Genus))
-ggplotly(ggplot(choat_des,aes(x=reorder(Species, P50), y=P50))+
-           labs(x="Species",y="P50 (MPa)") +
-           geom_boxplot() + ggtitle("Drought Designations - P50 Choat") +
-           theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                          size=10,vjust=0.5,
-                                                          hjust=1,face="italic"),
-                                 axis.text.x=element_text(color="black",size=10),
-                                 axis.ticks=element_line(color="black"),
-                                 axis.title=element_text(size=10),
-                                 legend.position="none")+ coord_flip()+
-           geom_point(aes(#text = paste("<br>Reference:", Reference_try),
-                          col=Country)))
-
-
-ggplotly(ggplot(choat_try,aes(x=reorder(Family, P50), y=P50))+
-           labs(x="Family",y="P50 (MPa)") +
-           geom_boxplot() + ggtitle("Full list - P50 Choat") +
-           theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                          size=10,vjust=0.5,
-                                                          hjust=1,face="italic"),
-                                 axis.text.x=element_text(color="black",size=10),
-                                 axis.ticks=element_line(color="black"),
-                                 axis.title=element_text(size=10),
-                                 legend.position="none")+ coord_flip()+#geom_point())
-#           geom_point(aes(col=Country)))
-           geom_point(aes(text=paste("<br>Species:", Species,"<br>P88:", P88))))
-#             col=Country)))
-
-
-ggplotly(ggplot(choat_des,aes(x=Species, y=P88))+
-           labs(x="Species",y="P88 (MPa)") +
-           geom_boxplot() + ggtitle("Drought Designations - P88 Choat") +
-           theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                          size=10,vjust=0.5,
-                                                          hjust=1,face="italic"),
-                                 axis.text.x=element_text(color="black",size=10),
-                                 axis.ticks=element_line(color="black"),
-                                 axis.title=element_text(size=10),
-                                 legend.position="none")+ coord_flip()+
-           geom_point(aes(text=paste("<br>Species:", Species,"<br>P50:", P50))))
-
-ggplotly(ggplot(choat_try,aes(x=reorder(Family, P88), y=P88))+
-           labs(x="Family",y="P88 (MPa)") +
-           geom_boxplot() + ggtitle("Full List - P88 Choat") +
-           theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                          size=10,vjust=0.5,
-                                                          hjust=1,face="italic"),
-                                 axis.text.x=element_text(color="black",size=10),
-                                 axis.ticks=element_line(color="black"),
-                                 axis.title=element_text(size=10),
-                                 legend.position="none")+ coord_flip()+ #geom_point())
-          geom_point(aes(text=paste("<br>Species:", Species,"<br>P50:", P50))))
-
-# How many Choat species have both P50 and P88?
-
-seeall<-choat_try %>%
-  select(Species,P50,P88,Reference,Source) %>%
-  filter(!is.na(P50)&!is.na(P88))#%>%
- #summarize(Count = length(Species))
-# 948 observations with both P88 and P50
-
-ggplotly(ggplot(seeall,aes(x=P50, y= P88))+geom_point())
-
-see<-choat_des %>%
-  select(Species,P50,P88,Reference,Source) %>%
-  filter(!is.na(P50)&!is.na(P88))##%>%
- # summarize(Count = length(Species))
-# 131 species that have both P50 and P88  
-
-
 # Combining Data Frames-------------------------------------
 
 # Data with TLP and FT - hirons_lon (long) and subset_l (long)
@@ -736,13 +571,12 @@ see<-choat_des %>%
 
 
 # make choat_try long
-choat_lon <-choat %>%
-  pivot_longer(cols = -c(Species, Location, Reference, Latitude,
-                         Longitude, Country, Source, Species_short,
-                         Comments, Plant_organ, Last),
-               names_to = "dat.type", values_to = "value") %>%
-  rename(Exposition = Location)%>%
-  filter(!is.na(value))
+#choat_lon <-choat %>%
+# mutate(value = as.numeric(value)) %>%
+# pivot_longer(cols = -c(1:11),
+#              names_to = "dat.type", values_to = "value") %>%
+# rename(Exposition = Location)%>%
+#  filter(!is.na(value))
 
 # We want to see what data we have for what species.
 # Make an ugly, long dataframe that can be summarized.
@@ -793,7 +627,7 @@ combined_long<- combined_long [!duplicated(combined_long[c("Species",
                                                              "Last",
                                                              "dat.type",
                                                              "value")]),]
-# 7373
+# 5863
 
 # Next steps. Calculate TLP from the FT values where needed. Intersect the species
 # list with the drought designations table and populate columns where data exists. 
@@ -833,7 +667,7 @@ tlp_dat<- tlp_dat %>%
                names_to = "dat.type",
                values_to = "value") 
 tlp_dat <- tlp_dat %>%
-  filter(dat.type == "psi.tlp") # 61
+  filter(dat.type == "psi.tlp") # 187
 # long data frame with TLP and FT values and corresponding metadata.
 # need to combine this back with the "sus" data frame
 # i think it worked
@@ -854,9 +688,9 @@ elms <- combined_long %>%
 
 desig_table <- desig_list %>%
   rename(Species_short = Species) %>%
-  left_join(.,turgor_dat) #%>% # 1561 observations
+  left_join(.,turgor_dat) %>% #%>% # 1561 observations
 #  filter(dat.type == "psi.tlp" | dat.type == "psi.ft") # 1155 obs
-
+  mutate(value = ifelse(value > 0, (value*-1), value))
 # get elm data back in
 desig_table <- bind_rows(desig_table, elms)
 
@@ -918,6 +752,9 @@ desig_table_com <- sum_desig_table %>%
 # bring back elm data
 desig_table_com <- desig_table_com %>%
   bind_rows(., elm)
+
+desig_table_com <- desig_table_com %>%
+  mutate(psi.tlp = ifelse(psi.tlp > 0, (psi.tlp(-1)), psi.tlp))
 # 199
 
 # write out csv file for the team
@@ -1222,6 +1059,171 @@ ggarrange(a, b, c, d, ncol = 2, nrow = 2)
 
 # Test downloaded the IL area and the file is stored in the 
 # Data for R folder on the drive.
+
+
+# Summary of P50 and P88 ----------------------------------
+
+#choat_des<-choat_try%>%
+#  left_join(desig_list, by = "Species")
+
+choat_try$Table <- ""
+
+# Loop through each row in test
+for (i in 1:nrow(choat_try)) {
+  # Check if the Species names in the test df match any of the 
+  # species names in the drought designation table
+  if (choat_try$Species[i] %in% desig_list$Species_new) {
+    choat_try$Table[i] <- "X"  # Mark 'X' in Table if there's a match
+  }
+}
+#1424
+
+# Include all of the elms
+choat_try<-choat_try%>%
+  #  mutate(Table=ifelse("Ulmus" %in% Species_new,Table=="X",Table))
+  mutate(Table = ifelse(grepl("ulmus", Species, ignore.case = TRUE), "X", Table))%>%
+  mutate(Genus = str_split(Species, " ", simplify = TRUE)[, 1]) %>%
+  mutate(Genus = str_trim(Genus))%>%
+  left_join(family,by="Genus")
+
+
+choat_des<- choat_try %>%
+  filter(Table=="X") %>%
+  left_join(coords,by=c("Latitude","Longitude","Country"))
+#202 
+
+choat_try %>%
+  filter(!is.na(P50))%>%
+  summarise(NumSpecies=length(unique(Species)),
+            NumGenera = length(unique(Genus)),
+            NumFamily = length(unique(Family)))
+# 562 unique species 
+# 289 unique genera
+# 100 unique Family
+
+choat_try %>%
+  filter(!is.na(P88))%>%
+  summarise(NumSpecies=length(unique(Species)),
+            NumGenera = length(unique(Genus)),
+            NumFamily = length(unique(Family)))
+# 468 unique species with P88 data
+# 252 unique genera with P88 data
+# 93 families
+
+choat_des %>%
+  filter(!is.na(P50))%>%
+  summarise(NumSpecies=length(unique(Species)),
+            NumGenera = length(unique(Genus)),
+            NumFamily = length(unique(Family)))
+# 43 unique species from designation list with P50 data
+# 31 unique genera from designation list with P50 data
+# 18 unique families from designation list with P50 data
+
+choat_des %>%
+  filter(!is.na(P88))%>%
+  summarise(NumSpecies=length(unique(Species)),
+            NumGenera = length(unique(Genus)),
+            NumFamily = length(unique(Family)))
+# 37 unique species from designation list with P88 data
+# 26 unique genera from designation list with P88 data
+# 14 unique families from designation list with P88 data
+
+
+# Graphing the Ptlp data
+
+names(choat_des)
+head(choat_des)
+
+p_50<-choat_des %>%
+  select(Species,Country,P50)%>%
+  distinct(.)%>%
+  group_by(Species)%>%
+  summarise(Count = length(P50),
+            Mean_TLP=mean(P50),
+            SD_TLP=sd(P50),
+            SE_TLP= sd(P50) / sqrt(n())) %>%
+  mutate(Mean_TLP = round(Mean_TLP, 2),SD_TLP = round(SD_TLP,2),
+         SE_TLP=round(SE_TLP,2))%>%
+  left_join(choat_des)#%>%
+#filter(Count>1)
+
+#choat_try %>%
+# select(Genus)%>%
+#filter(!duplicated(Genus))#%>%
+# write.csv("Genus_Choat.csv",row.names=F)
+
+
+
+
+length(unique(p_50$Genus))
+ggplotly(ggplot(choat_des,aes(x=reorder(Species, P50), y=P50))+
+           labs(x="Species",y="P50 (MPa)") +
+           geom_boxplot() + ggtitle("Drought Designations - P50 Choat") +
+           theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                          size=10,vjust=0.5,
+                                                          hjust=1,face="italic"),
+                                 axis.text.x=element_text(color="black",size=10),
+                                 axis.ticks=element_line(color="black"),
+                                 axis.title=element_text(size=10),
+                                 legend.position="none")+ coord_flip()+
+           geom_point(aes(#text = paste("<br>Reference:", Reference_try),
+             col=Country)))
+
+
+ggplotly(ggplot(choat_try,aes(x=reorder(Family, P50), y=P50))+
+           labs(x="Family",y="P50 (MPa)") +
+           geom_boxplot() + ggtitle("Full list - P50 Choat") +
+           theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                          size=10,vjust=0.5,
+                                                          hjust=1,face="italic"),
+                                 axis.text.x=element_text(color="black",size=10),
+                                 axis.ticks=element_line(color="black"),
+                                 axis.title=element_text(size=10),
+                                 legend.position="none")+ coord_flip()+#geom_point())
+           #           geom_point(aes(col=Country)))
+           geom_point(aes(text=paste("<br>Species:", Species,"<br>P88:", P88))))
+#             col=Country)))
+
+
+ggplotly(ggplot(choat_des,aes(x=Species, y=P88))+
+           labs(x="Species",y="P88 (MPa)") +
+           geom_boxplot() + ggtitle("Drought Designations - P88 Choat") +
+           theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                          size=10,vjust=0.5,
+                                                          hjust=1,face="italic"),
+                                 axis.text.x=element_text(color="black",size=10),
+                                 axis.ticks=element_line(color="black"),
+                                 axis.title=element_text(size=10),
+                                 legend.position="none")+ coord_flip()+
+           geom_point(aes(text=paste("<br>Species:", Species,"<br>P50:", P50))))
+
+ggplotly(ggplot(choat_try,aes(x=reorder(Family, P88), y=P88))+
+           labs(x="Family",y="P88 (MPa)") +
+           geom_boxplot() + ggtitle("Full List - P88 Choat") +
+           theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                          size=10,vjust=0.5,
+                                                          hjust=1,face="italic"),
+                                 axis.text.x=element_text(color="black",size=10),
+                                 axis.ticks=element_line(color="black"),
+                                 axis.title=element_text(size=10),
+                                 legend.position="none")+ coord_flip()+ #geom_point())
+           geom_point(aes(text=paste("<br>Species:", Species,"<br>P50:", P50))))
+
+# How many Choat species have both P50 and P88?
+
+seeall<-choat_try %>%
+  select(Species,P50,P88,Reference,Source) %>%
+  filter(!is.na(P50)&!is.na(P88))#%>%
+#summarize(Count = length(Species))
+# 948 observations with both P88 and P50
+
+ggplotly(ggplot(seeall,aes(x=P50, y= P88))+geom_point())
+
+see<-choat_des %>%
+  select(Species,P50,P88,Reference,Source) %>%
+  filter(!is.na(P50)&!is.na(P88))##%>%
+# summarize(Count = length(Species))
+# 131 species that have both P50 and P88  
 
 
 
