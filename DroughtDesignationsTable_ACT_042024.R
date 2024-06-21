@@ -437,13 +437,13 @@ for (i in 1:nrow(hirons_lon)) {
 hirons<-hirons_lon%>%
   #  mutate(Table=ifelse("Ulmus" %in% Species_new,Table=="X",Table))
   mutate(Table = ifelse(grepl("ulmus", Species_short, ignore.case = TRUE), "X", Table))
-# 300
+# 383
 
 hirons<-hirons%>%
   #filter(Table=="X")%>%
   mutate(Genus = str_split(Species, " ", simplify = TRUE)[, 1])%>%
   mutate(Genus = str_trim(Genus))
-# 300 rows
+# 383 rows
 
 hirons_des<-hirons %>% filter (Table == "X")
 # 186
@@ -641,12 +641,12 @@ combined_long<- combined_long [!duplicated(combined_long[c("Species",
 sus <- combined_long %>%
   filter(value > -20) # &
 #           Reference != "Ogaya, R. and J. Penuelas. 2003. Comparative field study of Quercus ilex and Phillyrea latifolia: photosynthetic response to experimental drought conditions. Environmental and Experimental Botany 50:137-148.")
-# 4806
+# 5850
 
 turgorpt <- sus %>%
   filter(dat.type == "psi.tlp" | dat.type == "psi.ft") %>% 
   select(Species_short, dat.type, value, Source, Reference,Plant_organ) #%>%
-# 988
+# 1546
 #pivot_wider(names_from = dat.type, values_from = value)
 
 # figure out what species I have psi.ft values for and not tlp values.
@@ -674,7 +674,7 @@ tlp_dat <- tlp_dat %>%
 # i think it worked
 
 turgor_dat <- bind_rows(tlp_dat, combined_long) # bind rows to add back in new calculated data
-# 5924rows
+# 6050 rows
 turgor_dat <- turgor_dat %>%
   distinct() #
 # 6050
@@ -697,7 +697,7 @@ desig_table <- bind_rows(desig_table, elms)
 
 #get rid of duplicates
 desig_table <- desig_table %>% filter(!duplicated(desig_table))
-#1070
+#1196
 # calculate mean and SD for each species based on data type
 sum_desig_table<- desig_table %>%
   filter(Plant_organ == "P" | Plant_organ == "L" | is.na(Plant_organ)) %>%
@@ -759,7 +759,7 @@ desig_table_com <- desig_table_com %>%
 # 199
 
 # write out csv file for the team
- write.csv(desig_table_com,"droughtdesignations_table_2024_03May.csv", row.names = F)
+# write.csv(desig_table_com,"droughtdesignations_table_2024_03May.csv", row.names = F)
 
 
 
