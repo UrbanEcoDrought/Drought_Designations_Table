@@ -1,5 +1,5 @@
 # UED - Drought Designations Table
-    # Updated by - A. Tumino on 21June2024
+    # Updated by - A. Tumino on 24June2024
 
 library(data.table)
 library(googlesheets4)
@@ -496,6 +496,7 @@ tlp_des<-hirons_des %>%
          SE_TLP=round(SE_TLP,2))%>%
   left_join(hirons_des)#%>%
 #  filter(Count>1)
+## 73 unique species
 ggplotly(ggplot(tlp_des,aes(x=reorder(Species_short, value), y=value))+
            labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
            geom_boxplot() + ggtitle("Drought Designations Species - Hirons")+
@@ -612,7 +613,7 @@ combined_long <- bind_rows(choat, bartlett, combined_long) # 7373
 
 combined_long <- combined_long %>% mutate(value = round(value, 2),
                                           Last = word(Reference, 1, sep = " "))
-
+# 7373
 summary <- combined_long %>%
   group_by(Species_short, dat.type) %>%
   summarize(Count = n()) %>%
@@ -638,15 +639,17 @@ combined_long<- combined_long [!duplicated(combined_long[c("Species",
 # Calculating PSI TLP from PSI FT -----------------------------------------
 
 # Using the equation Andy Hirons used, we are calculating PSI TLP from PSI FT
+# only for the plants with values recorded for either the petiole or leaf
 sus <- combined_long %>%
-  filter(value > -20) # &
+  filter(value > -20 & value <= 0) %>%
+  filter(Plant_organ == "P" | Plant_organ == "L")
 #           Reference != "Ogaya, R. and J. Penuelas. 2003. Comparative field study of Quercus ilex and Phillyrea latifolia: photosynthetic response to experimental drought conditions. Environmental and Experimental Botany 50:137-148.")
-# 5850
+# 1795
 
 turgorpt <- sus %>%
   filter(dat.type == "psi.tlp" | dat.type == "psi.ft") %>% 
-  select(Species_short, dat.type, value, Source, Reference,Plant_organ) #%>%
-# 1546
+  select(Species_short, dat.type, value, Source, Reference,Plant_organ)# %>%
+# 1110
 #pivot_wider(names_from = dat.type, values_from = value)
 
 # figure out what species I have psi.ft values for and not tlp values.
@@ -655,9 +658,9 @@ df_calc <- turgorpt %>%
   summarise(num_values = n()) %>%
   pivot_wider(names_from = dat.type, values_from = num_values) %>%
   filter(is.na(psi.tlp)) %>%
-  select(Species_short) %>% # 39 species with ft and not tlp
+  select(Species_short) %>% # 41 species with ft and not tlp
   inner_join(., combined_long, by = "Species_short") %>%
-  filter(dat.type == "psi.ft") #61
+  filter(dat.type == "psi.ft") # 41
 
 tlp_dat <- df_calc %>%
   rename(psi.ft = value) %>%
@@ -668,16 +671,43 @@ tlp_dat<- tlp_dat %>%
                names_to = "dat.type",
                values_to = "value") 
 tlp_dat <- tlp_dat %>%
-  filter(dat.type == "psi.tlp") # 187
+  filter(dat.type == "psi.tlp") # 41
 # long data frame with TLP and FT values and corresponding metadata.
 # need to combine this back with the "sus" data frame
 # i think it worked
+ 
+# repeat for full turgor data
 
-turgor_dat <- bind_rows(tlp_dat, combined_long) # bind rows to add back in new calculated data
-# 6050 rows
+df_calc_ft <- turgorpt %>%
+  group_by(Species_short, dat.type) %>%
+  summarise(num_values = n()) %>%
+  pivot_wider(names_from = dat.type, values_from = num_values) %>%
+  filter(is.na(psi.ft)) %>%
+  select(Species_short) %>% # 231 species with tlp and not ft
+  inner_join(., combined_long, by = "Species_short") %>%
+  filter(dat.type == "psi.tlp") #  231
+
+ft_dat <- df_calc_ft %>%
+  rename(psi.tlp = value) %>%
+  select(-dat.type) %>%
+  mutate(psi.ft = (psi.tlp+0.2554)/1.1243) #%>% # Calculation from Hirons et al 2020
+# 231
+ft_dat<- ft_dat %>%
+  pivot_longer(cols = -c(1:11,13:25), 
+               names_to = "dat.type",
+               values_to = "value") 
+# 462
+ft_dat <- ft_dat %>%
+  filter(dat.type == "psi.ft") # 231
+
+
+
+
+turgor_dat <- bind_rows(tlp_dat, combined_long,ft_dat) # bind rows to add back in new calculated data
+# 7645 rows
 turgor_dat <- turgor_dat %>%
   distinct() #
-# 6050
+# 7644
 
 # double check what is duplicated.
 duplicated_rows <- duplicated(turgor_dat)
@@ -690,14 +720,19 @@ elms <- combined_long %>%
 desig_table <- desig_list %>%
   rename(Species_short = Species) %>%
   left_join(.,turgor_dat) %>% #%>% # 1561 observations
-#  filter(dat.type == "psi.tlp" | dat.type == "psi.ft") # 1155 obs
+#  filter(dat.type == "psi.tlp" | dat.type == "psi.ft") # 1344 obs
   mutate(value = ifelse(value > 0, (value*-1), value))
 # get elm data back in
 desig_table <- bind_rows(desig_table, elms)
 
+
+### END HERE ON 6/24. need to double check the left_join is doing what we are
+# hoping for. 
+
+
 #get rid of duplicates
 desig_table <- desig_table %>% filter(!duplicated(desig_table))
-#1196
+# 1344
 # calculate mean and SD for each species based on data type
 sum_desig_table<- desig_table %>%
   filter(Plant_organ == "P" | Plant_organ == "L" | is.na(Plant_organ)) %>%
@@ -765,18 +800,19 @@ desig_table_com <- desig_table_com %>%
 
 
 # Plots for Luke ----------------------------------------------------------
+desig_table_com
 
 turgor_dat <- turgor_dat %>%
-  mutate(o_type = ifelse(Organ == "S" & dat.type == "P50", "S_P50",
-                         ifelse(Organ == "P" & dat.type == "P50","P_P50",
-                                ifelse(Organ == "S" & dat.type == "P88", "S_P88",
-                                ifelse(Organ == "P" & dat.type == "P88", "P_P88",dat.type)))))
+  mutate(o_type = ifelse(Plant_organ == "S" & dat.type == "P50", "S_P50",
+                         ifelse(Plant_organ == "P" & dat.type == "P50","P_P50",
+                                ifelse(Plant_organ == "S" & dat.type == "P88", "S_P88",
+                                ifelse(Plant_organ == "P" & dat.type == "P88", "P_P88",dat.type)))))
 
 # Filter Out Outliers
 
 # filter out all values that seem suspicious < -20
 sus <- turgor_dat %>%
-  filter(value > -20 &
+  filter(value > -20 & value < 0 &
            Reference != "Ogaya, R. and J. Penuelas. 2003. Comparative field study of Quercus ilex and Phillyrea latifolia: photosynthetic response to experimental drought conditions. Environmental and Experimental Botany 50:137-148.")
 
 # Plot for TLP and P50, IF there are multiple values per species, calculated
@@ -793,12 +829,12 @@ a_df<-sus %>%
   distinct(.) %>%
   pivot_wider(.,names_from = o_type, values_from = c(Mean_Value,SD_Value, Count)) %>%
   filter(!is.na(Mean_Value_S_P50),!is.na(Mean_Value_psi.tlp))
-# 38
+# 45
 
 correlation <- cor(a_df$Mean_Value_S_P50, a_df$Mean_Value_psi.tlp)
-# r = 0.19
+# r = 0.29
 p_value <- cor.test(a_df$Mean_Value_S_P50, a_df$Mean_Value_psi.tlp)$p.value
-# p = 0.24
+# p = 0.05
 shapiro.test((a_df$Mean_Value_S_P50))
 # normal
 shapiro.test(a_df$Mean_Value_psi.tlp)
@@ -828,7 +864,7 @@ a <- ggplot(a_df, aes(x = Mean_Value_S_P50, y = Mean_Value_psi.tlp)) + geom_poin
   annotate("text", x = min(a_df$Mean_Value_S_P50), y = max(a_df$Mean_Value_psi.tlp), 
            label = paste("r(s):", round(correlation, 2), "\n", 
                          "p:", round(p_value, 3), "\n",
-                         "n:", 38),
+                         "n:", 45),
            hjust = 1, vjust = 1) +
   geom_errorbar(
     aes(ymin = a_df$Mean_Value_psi.tlp - a_df$SD_Value_psi.tlp,
@@ -842,7 +878,7 @@ a <- ggplot(a_df, aes(x = Mean_Value_S_P50, y = Mean_Value_psi.tlp)) + geom_poin
     height = 0.1,
     color = "black"
   ) 
-# 38 points
+# 45 points
 
 # Plot for TLP and P88, IF there are multiple values per species, calculated
 # mean values and plotted those. 
@@ -858,7 +894,7 @@ b_df<- sus %>%
   distinct(.) %>%
   pivot_wider(.,names_from = o_type, values_from = c(Mean_Value,SD_Value,Count)) %>%
   filter(!is.na(Mean_Value_S_P88),!is.na(Mean_Value_psi.tlp))
-35
+# 51
 
 correlation <- cor(b_df$Mean_Value_S_P88, b_df$Mean_Value_psi.tlp)
 # r = 0.21
@@ -889,7 +925,7 @@ b <- ggplot(b_df, aes(x = Mean_Value_S_P88, y = Mean_Value_psi.tlp)) + geom_poin
   annotate("text", x = min(b_df$Mean_Value_S_P88+1), y = max(b_df$Mean_Value_psi.tlp), 
            label = paste("r(s):", round(correlation, 2), "\n", 
                          "p:", round(p_value, 3), "\n",
-                         "n:", 35),
+                         "n:", 51),
            hjust = 1, vjust = 1) +
   geom_errorbar(
     aes(ymin = b_df$Mean_Value_psi.tlp - b_df$SD_Value_psi.tlp,
@@ -954,7 +990,7 @@ c <- ggplot(c_df, aes(x = Mean_Value_S_P50, y = Mean_Value_psi.ft)) + geom_point
   annotate("text", x = min(c_df$Mean_Value_S_P50), y = max(c_df$Mean_Value_psi.ft), 
            label = paste("r(s):", round(correlation, 2), "\n", 
                          "p:", round(p_value, 3), "\n",
-                         "n:", 38),
+                         "n:", 43),
            hjust = 1, vjust = 1) +
   geom_errorbar(
     aes(ymin = c_df$Mean_Value_psi.ft - c_df$SD_Value_psi.ft,
@@ -1016,7 +1052,7 @@ d<-ggplot(d_df, aes(x = Mean_Value_S_P88, y = Mean_Value_psi.ft)) + geom_point()
   annotate("text", x = min(d_df$Mean_Value_S_P88+1), y = max(d_df$Mean_Value_psi.ft), 
            label = paste("r(s):", round(correlation, 2), "\n", 
                          "p:", round(p_value, 3), "\n",
-                         "n:", 35),
+                         "n:", 48),
            hjust = 1, vjust = 1) +
   geom_errorbar(
     aes(ymin = d_df$Mean_Value_psi.ft - d_df$SD_Value_psi.ft,
@@ -1034,12 +1070,6 @@ d<-ggplot(d_df, aes(x = Mean_Value_S_P88, y = Mean_Value_psi.ft)) + geom_point()
 ggplotly(c)
 ggarrange(a, b, c, d, ncol = 2, nrow = 2)
 
-# Talked with Luke on 3/29: 
-# Removed data set from Ogaya from try data set because many of the species are only found in the
-# Mediterranean and were dragging our data EXTREMELY negative (< - 20)
-
-# Even with those removed, the data still does not show a significant relationship
-# between P88 or P50 and PSI TLP/FT. 
 
 
 # ERA5 Data ---------------------------------------------------------------
