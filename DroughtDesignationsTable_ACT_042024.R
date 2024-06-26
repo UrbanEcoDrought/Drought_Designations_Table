@@ -101,6 +101,8 @@ hirons<-jakedat%>%
 # The below code should combine columns where they match and then remove extra columns. 
 # As much origin information was retained by combining the Source and Reference columns to reflect
 # where the infomration came from.
+jakedat_lon$Species <- str_trim(jakedat_lon$Species, side = "right")
+compiled_lon$Species <- str_trim(compiled_lon$Species, side = "right")
 
 hirons_lon <- full_join(jakedat_lon, compiled_lon, by = c("Species", "dat.type","value")) %>%
   mutate(
@@ -119,6 +121,22 @@ hirons_lon <- full_join(jakedat_lon, compiled_lon, by = c("Species", "dat.type",
   select(-Exposition.x, -Country.x, -Latitude.x, -Longitude.x, -Exposition.y, -Country.y, -Latitude.y, -Longitude.y,
          -Maturity.x, -Maturity.y, -Species_short.x, -Species_short.y, -Comments.x, -Comments.y, -Cultivar.x, -Cultivar.y, -Reference.x,
          -Reference.y, -Source.x, -Source.y, -Source_file.x, -Source_file.y)
+
+# if there are two rows with the exact same Species and dat.type values, 
+## then 1) average the value
+##      2) coalesce the rows.
+
+hirons_lon1 <- hirons_lon %>%
+  group_by(Species, dat.type) %>%
+  summarise(value = mean(value, na.rm = TRUE)) %>%
+  ungroup()
+
+hirons_lon1 <- hirons_lon %>%
+  group_by(Species, dat.type) %>%
+  mutate(value = ifelse(n() > 1, mean(value, na.rm = TRUE), value)) %>%
+  summarise(value = first(value)) %>%
+  ungroup()
+
 
 # Google Sheets -----------------------------------------------------------
 desig<-data.frame(read_sheet(ss="https://docs.google.com/spreadsheets/d/1Ap2zxfzQ2tA7Vw2YFKWG5WlASvh_DakGJGc-i07YDOo/edit#gid=2107989582"))
@@ -566,6 +584,7 @@ ggplotly(ggplot(tlp,aes(x=reorder(Genus, value), y= value))+
                                        "<br>Country:",Country),
                           col=Exposition)))
 
+
 # Combining Data Frames-------------------------------------
 
 # Data with TLP and FT - hirons_lon (long) and subset_l (long)
@@ -654,13 +673,13 @@ turgorpt <- sus %>%
 
 # figure out what species I have psi.ft values for and not tlp values.
 df_calc <- turgorpt %>%
-  group_by(Species_short, dat.type) %>%
+  group_by(Species_short, dat.type, Reference, Source) %>%
   summarise(num_values = n()) %>%
   pivot_wider(names_from = dat.type, values_from = num_values) %>%
   filter(is.na(psi.tlp)) %>%
-  select(Species_short) %>% # 41 species with ft and not tlp
-  inner_join(., combined_long, by = "Species_short") %>%
-  filter(dat.type == "psi.ft") # 41
+  select(Species_short, Reference, Source) %>% # 79 entries with ft and not tlp
+  inner_join(., combined_long, by = c("Species_short", "Reference", "Source")) %>%
+  filter(dat.type == "psi.ft") # 85
 
 tlp_dat <- df_calc %>%
   rename(psi.ft = value) %>%
@@ -671,7 +690,7 @@ tlp_dat<- tlp_dat %>%
                names_to = "dat.type",
                values_to = "value") 
 tlp_dat <- tlp_dat %>%
-  filter(dat.type == "psi.tlp") # 41
+  filter(dat.type == "psi.tlp") # 51
 # long data frame with TLP and FT values and corresponding metadata.
 # need to combine this back with the "sus" data frame
 # i think it worked
@@ -685,29 +704,29 @@ df_calc_ft <- turgorpt %>%
   filter(is.na(psi.ft)) %>%
   select(Species_short) %>% # 231 species with tlp and not ft
   inner_join(., combined_long, by = "Species_short") %>%
-  filter(dat.type == "psi.tlp") #  231
+  filter(dat.type == "psi.tlp") #  239
 
 ft_dat <- df_calc_ft %>%
   rename(psi.tlp = value) %>%
   select(-dat.type) %>%
   mutate(psi.ft = (psi.tlp+0.2554)/1.1243) #%>% # Calculation from Hirons et al 2020
-# 231
+# 239
 ft_dat<- ft_dat %>%
   pivot_longer(cols = -c(1:11,13:25), 
                names_to = "dat.type",
                values_to = "value") 
-# 462
+# 478
 ft_dat <- ft_dat %>%
-  filter(dat.type == "psi.ft") # 231
+  filter(dat.type == "psi.ft") # 239
 
 
 
 
 turgor_dat <- bind_rows(tlp_dat, combined_long,ft_dat) # bind rows to add back in new calculated data
-# 7645 rows
+# 6153 rows
 turgor_dat <- turgor_dat %>%
   distinct() #
-# 7644
+# 6153
 
 # double check what is duplicated.
 duplicated_rows <- duplicated(turgor_dat)
@@ -724,7 +743,7 @@ desig_table <- desig_list %>%
   mutate(value = ifelse(value > 0, (value*-1), value))
 # get elm data back in
 desig_table <- bind_rows(desig_table, elms)
-
+# 1077
 
 ### END HERE ON 6/24. need to double check the left_join is doing what we are
 # hoping for. 
@@ -732,7 +751,7 @@ desig_table <- bind_rows(desig_table, elms)
 
 #get rid of duplicates
 desig_table <- desig_table %>% filter(!duplicated(desig_table))
-# 1344
+# 1077
 # calculate mean and SD for each species based on data type
 sum_desig_table<- desig_table %>%
   filter(Plant_organ == "P" | Plant_organ == "L" | is.na(Plant_organ)) %>%
