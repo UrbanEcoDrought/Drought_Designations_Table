@@ -1,5 +1,5 @@
 # UED - Drought Designations Table
-    # Updated by - A. Tumino on 24June2024
+    # Updated by - A. Tumino on 27June2024
 
 library(data.table)
 library(googlesheets4)
@@ -12,33 +12,28 @@ library(reshape2)
 library(tidyr)
 library(plotly)
 library(rtry)
+library(readr)
 
-#test
 setwd("G:/Shared drives/Urban Ecological Drought/Drought Tolerance Designations/PSI-TLP Data/Data for R_do not edit")
 
 coords<-read.csv("USA_LatLongs.csv",header=T)
 coords<-coords%>%
-  mutate(Latitude = round(Latitude,4),
-         Longitude = round(Longitude, 4))%>%
-  separate(USDA_title_23, into = c("Zone_2023", "TempRange_F"), sep = ": ", remove = FALSE)%>%
-  mutate(Zone_2023 = str_trim(Zone_2023),TempRange_F=str_trim(TempRange_F))
+ mutate(Latitude = round(Latitude,4),
+        Longitude = round(Longitude, 4))%>%
+ separate(USDA_title_23, into = c("Zone_2023", "TempRange_F"), sep = ": ", remove = FALSE)%>%
+ mutate(Zone_2023 = str_trim(Zone_2023),TempRange_F=str_trim(TempRange_F))
 
-names(coords)
 # Hirons et al. 2020 data merge with Sjoman Data-------------------------------------------------
-jakedat <- read.csv("Jake summary data.csv", header = TRUE)
-
-jakedat <- jakedat %>%
-  mutate(Species = if_else(species == "Quercus muhlenbergii", "Quercus muehlenbergii", species), #fix spelling
-         Source = "Hirons et al. 2020", # add source information
-         #Source_file = "jakedat",
-         #Comments = NA, # dummy column
-         Species_short = ifelse(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 1], Species),
-         Cultivar = ifelse(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 2], NA_character_),
-         sum.tlp = round(sum.tlp, 2),
-         sum.opft = round(sum.opft, 2)) %>%
-  rename(psi.tlp = sum.tlp, psi.ft = sum.opft)%>%
-  transmute(Species, garden, Source, Species_short, Cultivar,psi.tlp,psi.ft) # separate out cultivar
-jakedat$Species_short <- str_trim(jakedat$Species_short, side = "right") # trim off trailing white space
+jakedat <- read_csv("Jake summary data.csv") %>%
+  mutate(
+    Species = str_trim(if_else(species == "Quercus muhlenbergii", "Quercus muehlenbergii", species), side = "right"), # Fix spelling
+    Source = "Hirons et al. 2020", # Add source information
+    Species_short = str_trim(if_else(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 1], Species), side = "right"),
+    Cultivar = if_else(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 2], NA_character_),
+    psi.tlp = round(sum.tlp, 2),
+    psi.ft = round(sum.opft, 2)
+  ) %>%
+  transmute(Species, garden, Source, Species_short, Cultivar, psi.tlp, psi.ft)
 
 
 # Add in lat long and country for the botanic gardens listed
@@ -49,63 +44,76 @@ botanicgardens<-data.frame(
   Longitude = c(13.082413825025307, 4.634059925481531, -76.45488406152685, -0.2897730340057771, -88.06907647320472, -3.0430448608760723, -0.5976980493519929)
 )
 
-jakedat<-jakedat%>% # combine with jake data frame (Hirons 2020 data)
-  left_join(botanicgardens)%>%
-  mutate(Longitude = round(Longitude, 4),
-         Latitude = round(Latitude, 4))
+jakedat <- jakedat %>%
+  left_join(botanicgardens) %>% # Combine with botanicgardens
+  mutate(
+    Longitude = round(Longitude, 4),
+    Latitude = round(Latitude, 4)
+  )
 
-jakedat_lon<- jakedat %>%
-  pivot_longer(cols = -c(Species, garden, Source, Species_short,
-                         Cultivar, Country, Latitude, Longitude), names_to = "dat.type", values_to = "value") %>%
-  rename(Exposition = "garden") %>%
-  mutate(Reference = "Hirons", Maturity = NA, Comments = NA, Source_file = "jakedat")
+# make long df
+jakedat_lon <- jakedat %>%
+  pivot_longer(
+    cols = -c(Species, garden, Source, Species_short, Cultivar, Country, Latitude, Longitude),
+    names_to = "dat.type",
+    values_to = "value"
+  ) %>%
+  rename(Exposition = garden) %>%
+  mutate(
+    Reference = "Hirons",
+    Maturity = NA,
+    Comments = NA,
+    Source_file = "jakedat"
+  )
 
-compiled<-read.csv("TRY Data Sjöman-Hirons Leaf Turgor Loss .csv",header=T)
+# 300 obs
 
-compiled <- compiled %>%
-  rename(Reference="Source")%>% # rename column
-  mutate(Species = if_else(Species == "Quercus muhlenbergii", "Quercus muehlenbergii", Species), # fix spelling
-         Source = "Sjoman et al. 2018", # add source column
-         #Source_file = "compiled",
-         #Latitude = NA, # dummy column
-         #Longitude = NA, # dummy column
-         #Country = NA, # dummy column
-         Species_short = ifelse(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 1], Species),
-         Cultivar = ifelse(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 2], NA_character_)) %>%
-  transmute(Species,Species_short,Exposition,Maturity,Source,Reference,Cultivar,Osmotic_potential_full_turgor_MPa,
-            Leaf_turgor_loss_pt_MPa,Comments) %>% # separate cultivar 
-  rename(psi.ft = Osmotic_potential_full_turgor_MPa, psi.tlp = Leaf_turgor_loss_pt_MPa)
-compiled$Species_short<- str_trim(compiled$Species_short, side = "right") # trim of trailing space
+compiled <- read_csv("TRY Data Sjöman-Hirons Leaf Turgor Loss .csv") %>%
+  rename(Reference = "Source") %>% # Rename column
+  mutate(
+    Species = str_trim(if_else(Species == "Quercus muhlenbergii", "Quercus muehlenbergii", Species), side = "right"), # Fix spelling
+    Source = "Sjoman et al. 2018", # Add source column
+    Species_short = str_trim(if_else(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 1], Species), side = "right"),
+    Cultivar = if_else(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 2], NA_character_)
+  ) %>%
+  rename(
+    psi.ft = Osmotic_potential_full_turgor_MPa,
+    psi.tlp = Leaf_turgor_loss_pt_MPa
+  ) %>%
+  select(Species, Species_short, Exposition, Maturity, Source, Reference, Cultivar, psi.ft, psi.tlp, Comments) # Select relevant columns
 
 compiled_lon <- compiled %>%
-  pivot_longer(cols = -c(Species, Exposition, Source, Species_short,
-                         Cultivar, Reference, Comments, Maturity), names_to = "dat.type", values_to = "value") %>%
-  mutate(Country = NA, Latitude = NA, Longitude = NA, Source_file = "compiled")
-#compiled<- melt(compiled, id = c("Species", "Location","Country","Latitude", # wide to long
-#                                "Longitude","Species_new", "Cultivar","Comments",
-#                                "Maturity","Source","Reference")) %>%
-# rename(Dat.Type = "variable", Psi = "value") %>% # rename
-#  mutate(Dat.Type = if_else(Dat.Type == "Leaf_turgor_loss_pt_MPa", "Ptlp", "Pft")) # change names in data type
-
-hirons<-jakedat%>%
-  full_join(compiled,by=c("Species","Species_short","Cultivar"))%>%
-  rename(Source_Hirons = Source.x,Psi_tlp_Hirons = psi.tlp.x, Psi_ft_Hirons = psi.ft.x,
-         Source_Sjoman = Source.y, Psi_ft_Sjoman = psi.ft.y,
-         Psi_tlp_Sjoman = psi.tlp.y, Refernce_Sjoman = Reference)%>%
-  full_join(coords,by=c("Latitude","Longitude","Country","garden"))
-#217 obs
+  pivot_longer(
+    cols = -c(Species, Exposition, Source, Species_short, Cultivar, Reference, Comments, Maturity),
+    names_to = "dat.type",
+    values_to = "value"
+  ) %>%
+  mutate(
+    Country = NA,
+    Latitude = NA,
+    Longitude = NA,
+    Source_file = "compiled"
+  )
+# 142 obs
 
 # make into one long DF
 # Because all of this data is from Andy Hirons, there are duplicated rows across the two
 # datasets, where the jakedat_lon has more complete information.
 # The below code should combine columns where they match and then remove extra columns. 
 # As much origin information was retained by combining the Source and Reference columns to reflect
-# where the infomration came from.
-jakedat_lon$Species <- str_trim(jakedat_lon$Species, side = "right")
-compiled_lon$Species <- str_trim(compiled_lon$Species, side = "right")
+# where the information came from.
 
-hirons_lon <- full_join(jakedat_lon, compiled_lon, by = c("Species", "dat.type","value")) %>%
+
+hirons_lon <- full_join(jakedat_lon, compiled_lon, by = c("Species", "dat.type")) 
+
+# if there are two rows with the exact same Species and dat.type values, 
+## then 1) average the value
+##      2) coalesce the rows.
+
+
+hirons_lon <- hirons_lon %>%
   mutate(
+    value = round(rowMeans(select(., starts_with("value")), na.rm = TRUE),2),
     Exposition = coalesce(Exposition.x, Exposition.y),
     Country = coalesce(Country.x, Country.y),
     Latitude = coalesce(Latitude.x, Latitude.y),
@@ -118,35 +126,20 @@ hirons_lon <- full_join(jakedat_lon, compiled_lon, by = c("Species", "dat.type",
     Source = paste(Source.x, Source.y, sep = ", "),
     Reference = paste(Reference.x, Reference.y, sep = ", ")
   ) %>%
-  select(-Exposition.x, -Country.x, -Latitude.x, -Longitude.x, -Exposition.y, -Country.y, -Latitude.y, -Longitude.y,
-         -Maturity.x, -Maturity.y, -Species_short.x, -Species_short.y, -Comments.x, -Comments.y, -Cultivar.x, -Cultivar.y, -Reference.x,
-         -Reference.y, -Source.x, -Source.y, -Source_file.x, -Source_file.y)
-
-# if there are two rows with the exact same Species and dat.type values, 
-## then 1) average the value
-##      2) coalesce the rows.
-
-hirons_lon1 <- hirons_lon %>%
-  group_by(Species, dat.type) %>%
-  summarise(value = mean(value, na.rm = TRUE)) %>%
-  ungroup()
-
-hirons_lon1 <- hirons_lon %>%
-  group_by(Species, dat.type) %>%
-  mutate(value = ifelse(n() > 1, mean(value, na.rm = TRUE), value)) %>%
-  summarise(value = first(value)) %>%
-  ungroup()
-
-
+  select(-matches("\\.x$"), -matches("\\.y$"))
+# 364 
+  
 # Google Sheets -----------------------------------------------------------
 desig<-data.frame(read_sheet(ss="https://docs.google.com/spreadsheets/d/1Ap2zxfzQ2tA7Vw2YFKWG5WlASvh_DakGJGc-i07YDOo/edit#gid=2107989582"))
 2
-desig_list<-desig%>%
-  select(Species)%>%
-  mutate(Species = if_else(Species == "Platanus x acerifolia (syn hispanica)", "Platanus x acerifolia", Species),
-         Species_new=Species)
-#desig_list<- data.frame(desig_list[1:159, ])
-desig_list<-data.frame(desig_list[-c(158,160:162,176:179),])
+desig_list <- desig %>%
+  select(Species) %>%
+  mutate(
+    Species = if_else(Species == "Platanus x acerifolia (syn hispanica)", "Platanus x acerifolia", Species),
+    Species_new = Species
+  ) %>%
+  filter(!row_number() %in% c(158, 160:162, 176:179)) %>%
+  as.data.frame()
 
 
 
@@ -294,7 +287,7 @@ num_traits <- rtry_select_row(workdata, complete.cases(TraitID) & complete.cases
 # dim:   5804 17 
 num_traits <- rtry_select_col(num_traits, ObservationID, AccSpeciesID, AccSpeciesName, TraitID, TraitName, StdValue, UnitName,
                               OriglName, OrigValueStr, OrigObsDataID)
-# dim:   5804 8 
+# dim:   5804 10
 # col:   ObservationID AccSpeciesID AccSpeciesName TraitID TraitName StdValue UnitName 
 
 
@@ -353,6 +346,8 @@ workdata_2 <- workdata_2 %>%
 # 5804 obs
 
 workdata_2 <- rtry_remove_dup(workdata_2)
+
+# 5804 obs
 
 # Choat et al. 2012 data --------------------------------------------------
 
@@ -482,7 +477,7 @@ hirons_des%>%
 length(unique(hirons_des$Species_short))
 # 73 unique species total (not counting variety)
 length(unique(hirons_des$Species))
-# 82 with cultivar
+# 79 with cultivar
 length(unique(hirons_des$Genus))
 # 26 unique genera
 length(unique(hirons$Species_short))
@@ -617,7 +612,7 @@ workdata_2 <- workdata_2 %>%
   mutate(Source = "TRY data")
 # combine rows
 combined_long <- bind_rows(hirons_lon, workdata_2)
-# 6187
+# 6168
 
 names(combined_long)
 bartlett <- bartlett %>%
@@ -627,12 +622,13 @@ bartlett <- bartlett %>%
                values_to = "value") %>%
   mutate(Plant_organ = "P")
 
-combined_long <- bind_rows(choat, bartlett, combined_long) # 7373  
+combined_long <- bind_rows(choat, bartlett, combined_long) # 7354  
 # include on plot: R, P, N. 
 
 combined_long <- combined_long %>% mutate(value = round(value, 2),
-                                          Last = word(Reference, 1, sep = " "))
-# 7373
+                                          Last = word(Reference, 1, sep = " ")) %>%
+  mutate(value = ifelse(value>0, value * -1,value))
+# 7354
 summary <- combined_long %>%
   group_by(Species_short, dat.type) %>%
   summarize(Count = n()) %>%
@@ -648,7 +644,7 @@ combined_long<- combined_long [!duplicated(combined_long[c("Species",
                                                              "Last",
                                                              "dat.type",
                                                              "value")]),]
-# 5863
+# 5844
 
 # Next steps. Calculate TLP from the FT values where needed. Intersect the species
 # list with the drought designations table and populate columns where data exists. 
@@ -662,14 +658,12 @@ combined_long<- combined_long [!duplicated(combined_long[c("Species",
 sus <- combined_long %>%
   filter(value > -20 & value <= 0) %>%
   filter(Plant_organ == "P" | Plant_organ == "L")
-#           Reference != "Ogaya, R. and J. Penuelas. 2003. Comparative field study of Quercus ilex and Phillyrea latifolia: photosynthetic response to experimental drought conditions. Environmental and Experimental Botany 50:137-148.")
-# 1795
+# 2131
 
 turgorpt <- sus %>%
   filter(dat.type == "psi.tlp" | dat.type == "psi.ft") %>% 
   select(Species_short, dat.type, value, Source, Reference,Plant_organ)# %>%
-# 1110
-#pivot_wider(names_from = dat.type, values_from = value)
+# 1447
 
 # figure out what species I have psi.ft values for and not tlp values.
 df_calc <- turgorpt %>%
@@ -677,9 +671,9 @@ df_calc <- turgorpt %>%
   summarise(num_values = n()) %>%
   pivot_wider(names_from = dat.type, values_from = num_values) %>%
   filter(is.na(psi.tlp)) %>%
-  select(Species_short, Reference, Source) %>% # 79 entries with ft and not tlp
+  select(Species_short, Reference, Source) %>% # 58 entries with ft and not tlp
   inner_join(., combined_long, by = c("Species_short", "Reference", "Source")) %>%
-  filter(dat.type == "psi.ft") # 85
+  filter(dat.type == "psi.ft") # 304
 
 tlp_dat <- df_calc %>%
   rename(psi.ft = value) %>%
@@ -690,43 +684,44 @@ tlp_dat<- tlp_dat %>%
                names_to = "dat.type",
                values_to = "value") 
 tlp_dat <- tlp_dat %>%
-  filter(dat.type == "psi.tlp") # 51
+  filter(dat.type == "psi.tlp") # 304
+
 # long data frame with TLP and FT values and corresponding metadata.
 # need to combine this back with the "sus" data frame
 # i think it worked
  
 # repeat for full turgor data
 
-df_calc_ft <- turgorpt %>%
-  group_by(Species_short, dat.type) %>%
-  summarise(num_values = n()) %>%
-  pivot_wider(names_from = dat.type, values_from = num_values) %>%
-  filter(is.na(psi.ft)) %>%
-  select(Species_short) %>% # 231 species with tlp and not ft
-  inner_join(., combined_long, by = "Species_short") %>%
-  filter(dat.type == "psi.tlp") #  239
+#df_calc_ft <- turgorpt %>%
+#  group_by(Species_short, dat.type) %>%
+#  summarise(num_values = n()) %>%
+#  pivot_wider(names_from = dat.type, values_from = num_values) %>%
+#  filter(is.na(psi.ft)) %>%
+# select(Species_short) %>% # 231 species with tlp and not ft
+#  inner_join(., combined_long, by = "Species_short") %>%
+#  filter(dat.type == "psi.tlp") #  239
 
-ft_dat <- df_calc_ft %>%
-  rename(psi.tlp = value) %>%
-  select(-dat.type) %>%
-  mutate(psi.ft = (psi.tlp+0.2554)/1.1243) #%>% # Calculation from Hirons et al 2020
+#ft_dat <- df_calc_ft %>%
+#  rename(psi.tlp = value) %>%
+#  select(-dat.type) %>%
+#  mutate(psi.ft = (psi.tlp+0.2554)/1.1243) #%>% # Calculation from Hirons et al 2020
 # 239
-ft_dat<- ft_dat %>%
-  pivot_longer(cols = -c(1:11,13:25), 
-               names_to = "dat.type",
-               values_to = "value") 
+#ft_dat<- ft_dat %>%
+#  pivot_longer(cols = -c(1:11,13:25), 
+#               names_to = "dat.type",
+#               values_to = "value") 
 # 478
-ft_dat <- ft_dat %>%
-  filter(dat.type == "psi.ft") # 239
+#ft_dat <- ft_dat %>%
+#  filter(dat.type == "psi.ft") # 239
 
 
 
 
-turgor_dat <- bind_rows(tlp_dat, combined_long,ft_dat) # bind rows to add back in new calculated data
-# 6153 rows
+turgor_dat <- bind_rows(tlp_dat, combined_long) # bind rows to add back in new calculated data
+# 6142 rows
 turgor_dat <- turgor_dat %>%
   distinct() #
-# 6153
+# 6142 
 
 # double check what is duplicated.
 duplicated_rows <- duplicated(turgor_dat)
@@ -738,20 +733,16 @@ elms <- combined_long %>%
 
 desig_table <- desig_list %>%
   rename(Species_short = Species) %>%
-  left_join(.,turgor_dat) %>% #%>% # 1561 observations
+  left_join(.,turgor_dat) %>% #%>% # 1022 observations
 #  filter(dat.type == "psi.tlp" | dat.type == "psi.ft") # 1344 obs
   mutate(value = ifelse(value > 0, (value*-1), value))
 # get elm data back in
 desig_table <- bind_rows(desig_table, elms)
-# 1077
-
-### END HERE ON 6/24. need to double check the left_join is doing what we are
-# hoping for. 
-
+# 1232
 
 #get rid of duplicates
 desig_table <- desig_table %>% filter(!duplicated(desig_table))
-# 1077
+# 1232
 # calculate mean and SD for each species based on data type
 sum_desig_table<- desig_table %>%
   filter(Plant_organ == "P" | Plant_organ == "L" | is.na(Plant_organ)) %>%
@@ -813,7 +804,7 @@ desig_table_com <- desig_table_com %>%
 # 199
 
 # write out csv file for the team
-# write.csv(desig_table_com,"droughtdesignations_table_2024_03May.csv", row.names = F)
+write.csv(desig_table_com,"droughtdesignations_table_2024_27June.csv", row.names = F)
 
 
 
