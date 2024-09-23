@@ -1,5 +1,5 @@
 # UED - Drought Designations Table
-    # Updated by - A. Tumino on 13September2024
+    # Updated by - A. Tumino on 23Sept2024
 
 library(data.table)
 library(googlesheets4)
@@ -1005,18 +1005,18 @@ sum_desig_table$TDAG_UED <- ifelse(sum_desig_table$Mean_Value_psi.tlp > -2.5, "S
                                                  ifelse(sum_desig_table$Mean_Value_psi.tlp < -3.5, "Tolerant", NA))))
 # combine data into one cell for the table 
 # this gives weird NA ( NA ) as character strings
-sum_desig_table <- sum_desig_table %>%  
-  mutate(P50 = paste(Mean_Value_P50, "(", SD_Value_P50, ")"),
-         P88 = paste(Mean_Value_P88, "(", SD_Value_P88, ")"),
-         psi.tlp = paste(Mean_Value_psi.tlp, "(", SD_Value_psi.tlp, ")"),
-         psi.ft = paste(Mean_Value_psi.ft, "(", SD_Value_psi.ft, ")")) %>%
-  select(-2:-11)
+#sum_desig_table <- sum_desig_table %>%  
+#  mutate(P50 = paste(Mean_Value_P50, "(", SD_Value_P50, ")"),
+#         P88 = paste(Mean_Value_P88, "(", SD_Value_P88, ")"),
+##         psi.tlp = paste(Mean_Value_psi.tlp, "(", SD_Value_psi.tlp, ")"),
+#         psi.ft = paste(Mean_Value_psi.ft, "(", SD_Value_psi.ft, ")")) %>%
+#  select(-2:-11)
 
 # get rid of the weird  NA ( NA ) 
-sum_desig_table$P50 <- ifelse(sum_desig_table$P50 == "NA ( NA )", NA, sum_desig_table$P50)
-sum_desig_table$P88 <- ifelse(sum_desig_table$P88 == "NA ( NA )", NA, sum_desig_table$P88)
-sum_desig_table$psi.tlp <- ifelse(sum_desig_table$psi.tlp == "NA ( NA )", NA, sum_desig_table$psi.tlp)
-sum_desig_table$psi.ft <- ifelse(sum_desig_table$psi.ft == "NA ( NA )", NA, sum_desig_table$psi.ft)
+#sum_desig_table$P50 <- ifelse(sum_desig_table$P50 == "NA ( NA )", NA, sum_desig_table$P50)
+#sum_desig_table$P88 <- ifelse(sum_desig_table$P88 == "NA ( NA )", NA, sum_desig_table$P88)
+#sum_desig_table$psi.tlp <- ifelse(sum_desig_table$psi.tlp == "NA ( NA )", NA, sum_desig_table$psi.tlp)
+#um_desig_table$psi.ft <- ifelse(sum_desig_table$psi.ft == "NA ( NA )", NA, sum_desig_table$psi.ft)
 
 # pull out data for elms so rejoin later
 elm <- sum_desig_table %>%
@@ -1047,26 +1047,33 @@ desig_table_com <- desig_table_com %>%
 # this is an absolute mess. leaving off for now. I want to intersect the
 # desig table list with NITS and ALSO intersect the full tlp_dat list with NITS
 
-
+# desig_list
+# combined_long
+# Species includes cultivar
+# Species_short does not include cultivar
 
 NITS <- read.csv("NITS_plantlist.csv",header=T)
-NITS <- NITS %>% 
-  mutate(Species_new = Species,
-         Species_2 = Species)%>%
-  separate(Species, c("Species_short", "Cultivar"), "'") %>%
-  separate(Species_new, c("Species_now","Variety"), "var.") %>%
-  separate(Species_2, c("Species_short", "SSP"), "ssp.")
-  select(-Species_now)
-rename(Species = Species_new) %>%
-  mutate(Genus = str_split(Species_short, " ", simplify = TRUE)[, 1])%>%
-  mutate(Genus = str_trim(Genus))
-  
-desig_NITS <- desig_list %>%
-  anti_join(NITS)
-# 35 species not in our desig list that are in NITS
 
+names(NITS)
+length(unique(NITS$Species)) # 197 unique species including cultivar
+length(unique(NITS$Species_short)) # 187 unique species not including cultivar
 
+# Cross reference this list with the designation table 
+names(desig_list)
 
+desig_list <- elms %>% select(Species) %>% bind_rows(.,desig_list) %>% select(-Species_short)
+
+NITS$ExistsInDesig <- NITS$Species_short %in% desig_list$Species
+
+int <- NITS %>%
+  filter(ExistsInDesig == F)
+# 39 species in NITS that are not on our table
+
+NITS$ExistsInAllDat <- NITS$Species_short %in% combined_long$Species_short
+int <- NITS %>%
+  filter(ExistsInAllDat == F)
+
+# 82 species in NITS that we don't have any data for in our large DF
 
 
 
