@@ -1,5 +1,5 @@
 # UED - Drought Designations Table
-    # Updated by - A. Tumino on 23Sept2024
+    # Updated by - A. Tumino on 24Sept2024
 
 library(data.table)
 library(googlesheets4)
@@ -924,43 +924,104 @@ ggplotly(ggplot(tlp_dat,aes(x=reorder(Genus, value), y=value))+
 
 # Intersect and Update Designation Table ----------------------------------
 
+turgor_dat <- turgor_dat %>%
+  mutate(value = ifelse(value > 0, (value*-1), value),
+         Genus = str_split(Species_short, " ", simplify = TRUE)[, 1])%>%
+  mutate(Genus = str_trim(Genus)) %>%
+  filter(value > -20 & value < 0)
+# 6199
+
+
+
+# calculate mean and SD for each species based on data type
+sum_turgor<- turgor_dat%>%
+  filter(Plant_organ == "P" | Plant_organ == "L" | is.na(Plant_organ)) %>%
+  group_by(Species_short, dat.type) %>%
+  select(Species_short,dat.type, value) %>%
+  mutate(Mean_Value = round(mean(value),2),
+         SD_Value = round(sd(value),2),
+         Count = n()  # Calculate the count of points in each group
+  )%>%
+  select(-value) %>%
+  distinct(.) %>% 
+  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value, Count)) 
+# 1186
+
+# TDAG associations for Psi turgor loss point
+# Sensitive: > -2.5 MPa
+# Moderately Sensitive -2.5 MPa to -3 MPa
+# Moderately Tolerant -3 MPa to -3.5 MPa
+# Tolerant < -3.5 MPa
+
+
+## need to use pivot_wider above to get this output to work
+# I wanted to create a faceted graph to look at the relationship between psi.tlp and 
+# P50 and P88, so I have left it out for now.
+
+# if else statements to create column of assigned drought designations using the above parameters
+sum_turgor$Drought_tol <- ifelse(sum_turgor$Mean_Value_psi.tlp > -2.5, "Sensitive",
+                                 ifelse((sum_turgor$Mean_Value_psi.tlp >= -3 & sum_turgor$Mean_Value_psi.tlp <= -2.5), "Moderately Sensitive",  
+                                        ifelse((sum_turgor$Mean_Value_psi.tlp >= -3.5 & sum_turgor$Mean_Value_psi.tlp < -3), "Moderately Tolerant",
+                                               ifelse(sum_turgor$Mean_Value_psi.tlp < -3.5, "Tolerant", NA))))
+
+
+# create plots by species - bar plot
+
+tlp_dat <- sum_turgor %>% 
+  select(Species_short,Drought_tol) %>%
+  full_join(turgor_dat) %>%
+   filter(dat.type == "psi.tlp")
 
 elms <- tlp_dat %>%
+  filter(Species_short %like% "Ulmus") %>%
+  filter(dat.type == "psi.tlp")
+# 19
+
+
+tlp_dat$ExistsInDesig <- tlp_dat$Species_short %in% desig_list$Species
+
+desig_tlp_dat <- tlp_dat %>%
+  filter(ExistsInDesig == TRUE & dat.type == "psi.tlp")
+
+
+desig_tlp_dat <- bind_rows(desig_tlp_dat, elms)
+# 366
+length(unique(desig_tlp_dat$Species_short))
+# 90
+
+sum_turgor$ExistsInDesig <- sum_turgor$Species_short %in% desig_list$Species
+
+desig_sum_turgor <- sum_turgor %>%
+  filter(ExistsInDesig == TRUE)
+
+elms_sum <- sum_turgor %>%
   filter(Species_short %like% "Ulmus")
+# 19 elms
 
-# Intersect species list with Designation Table
-desig_table <- desig_list %>%
-  left_join(.,tlp_dat) %>% #%>% # 1022 observations
-  #  filter(dat.type == "psi.tlp" | dat.type == "psi.ft") # 1344 obs
-  mutate(value = ifelse(value > 0, (value*-1), value))
-# get elm data back in
-desig_table <- bind_rows(desig_table, elms)
-# 451
+desig_sum_turgor <- bind_rows(desig_sum_turgor, elms_sum)
+# 114
+# number of unique species matches the summed df 
 
-#get rid of duplicates
-desig_table <- desig_table %>% filter(!duplicated(desig_table))
-# 451
+ggplotly(ggplot(desig_tlp_dat,aes(x=reorder(Species_short, value), y=value))+
+             labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
+             geom_boxplot() + ggtitle("Full Data PSI TLP")+
+             geom_point(aes(
+               text = paste(
+                 "<br>Cultivar:",Cultivar,
+                 "<br>Drought Tolerance:",Drought_tol,
+                 "<br>Source Data File:",Source),
+               col=Drought_tol)) +
+             theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                            size=10,vjust=0.5,
+                                                            hjust=1,face="italic"),
+                                   axis.text.x=element_text(color="black",size=10),
+                                   axis.ticks=element_line(color="black"),
+                                   axis.title=element_text(size=10),
+                                   legend.position="none")+ coord_flip(), tooltip = "text")
 
-ggplotly(ggplot(desig_table,aes(x=reorder(Species_short, value), y=value))+
-           labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-           geom_boxplot() + ggtitle("Designation Table PSI TLP")+
-           geom_point(aes(
-             text = paste(
-               "<br>Cultivar:",Cultivar,
-               "<br>Drought Tolerance:",Drought_tol,
-               "<br>Source Data File:",Source),
-             col=Drought_tol)) +
-           theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                          size=10,vjust=0.5,
-                                                          hjust=1,face="italic"),
-                                 axis.text.x=element_text(color="black",size=10),
-                                 axis.ticks=element_line(color="black"),
-                                 axis.title=element_text(size=10),
-                                 legend.position="none")+ coord_flip(), tooltip = "text")
-
-ggplotly(ggplot(desig_table,aes(x=reorder(Genus, value), y=value))+
+ggplotly(ggplot(tlp_dat,aes(x=reorder(Genus, value), y=value))+
            labs(x="Genus",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-           geom_boxplot() + ggtitle("Designation Table PSI TLP")+
+           geom_boxplot() + ggtitle("Full Data PSI TLP")+
            geom_point(aes(
              text = paste(
                "<br>Species:",Species_short,
@@ -975,71 +1036,8 @@ ggplotly(ggplot(desig_table,aes(x=reorder(Genus, value), y=value))+
                                  axis.title=element_text(size=10),
                                  legend.position="none")+ coord_flip(), tooltip = "text")
 
-
-
-# calculate mean and SD for each species based on data type
-sum_desig_table<- desig_table %>%
-  filter(Plant_organ == "P" | Plant_organ == "L" | is.na(Plant_organ)) %>%
-  select(Species_short,dat.type, value) %>%
-  group_by(Species_short, dat.type) %>%
-  mutate(Mean_Value = round(mean(value),2),
-         SD_Value = round(sd(value),2),
-         Count = n()  # Calculate the count of points in each group
-  ) %>%
-  select(-value) %>%
-  distinct(.) %>% #733
-  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value, Count)) %>%
-  select(-Mean_Value_NA, -SD_Value_NA, -Count_NA) 
-# 83
-
-# TDAG associations for Psi turgor loss point
-# Sensitive: > -2.5 MPa
-# Moderately Sensitive -2.5 MPa to -3 MPa
-# Moderately Tolerant -3 MPa to -3.5 MPa
-# Tolerant < -3.5 MPa
-
-# if else statements to create column of assigned drought designations using the above parameters
-sum_desig_table$TDAG_UED <- ifelse(sum_desig_table$Mean_Value_psi.tlp > -2.5, "Sensitive",
-                                   ifelse((sum_desig_table$Mean_Value_psi.tlp >= -3 & sum_desig_table$Mean_Value_psi.tlp <= -2.5), "Moderately Sensitive",
-                                          ifelse((sum_desig_table$Mean_Value_psi.tlp >= -3.5 & sum_desig_table$Mean_Value_psi.tlp < -3), "Moderately Tolerant",
-                                                 ifelse(sum_desig_table$Mean_Value_psi.tlp < -3.5, "Tolerant", NA))))
-# combine data into one cell for the table 
-# this gives weird NA ( NA ) as character strings
-#sum_desig_table <- sum_desig_table %>%  
-#  mutate(P50 = paste(Mean_Value_P50, "(", SD_Value_P50, ")"),
-#         P88 = paste(Mean_Value_P88, "(", SD_Value_P88, ")"),
-##         psi.tlp = paste(Mean_Value_psi.tlp, "(", SD_Value_psi.tlp, ")"),
-#         psi.ft = paste(Mean_Value_psi.ft, "(", SD_Value_psi.ft, ")")) %>%
-#  select(-2:-11)
-
-# get rid of the weird  NA ( NA ) 
-#sum_desig_table$P50 <- ifelse(sum_desig_table$P50 == "NA ( NA )", NA, sum_desig_table$P50)
-#sum_desig_table$P88 <- ifelse(sum_desig_table$P88 == "NA ( NA )", NA, sum_desig_table$P88)
-#sum_desig_table$psi.tlp <- ifelse(sum_desig_table$psi.tlp == "NA ( NA )", NA, sum_desig_table$psi.tlp)
-#um_desig_table$psi.ft <- ifelse(sum_desig_table$psi.ft == "NA ( NA )", NA, sum_desig_table$psi.ft)
-
-# pull out data for elms so rejoin later
-elm <- sum_desig_table %>%
-  filter(Species_short %like% "Ulmus") %>%
-  rename(Species = Species_short)
-
-# join summary of PSI TLP and PSI FT data to the original
-# desig table created by Brendon, Jake, and UED team
-desig_table_com <- sum_desig_table %>%
-  rename(Species = Species_short) %>%
-  right_join(desig)
-
-# bring back elm data
-desig_table_com <- desig_table_com %>%
-  bind_rows(., elm)
-
-desig_table_com <- desig_table_com %>%
-  mutate(psi.tlp = ifelse(psi.tlp > 0, (psi.tlp(-1)), psi.tlp))
-# 199
-
 # write out csv file for the team
 # write.csv(desig_table_com,"droughtdesignations_table_2024_27June.csv", row.names = F)
-
 
 
 # How does our list compare to NITS? --------------------------------------
