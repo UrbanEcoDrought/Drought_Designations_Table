@@ -987,7 +987,7 @@ desig_tlp_dat <- tlp_dat %>%
 desig_tlp_dat <- bind_rows(desig_tlp_dat, elms)
 # 366
 length(unique(desig_tlp_dat$Species_short))
-# 90
+# 90, only psi.tlp data so less species than 114 below.There are 24 species with no psi.tlp data.
 
 sum_turgor$ExistsInDesig <- sum_turgor$Species_short %in% desig_list$Species
 
@@ -998,15 +998,16 @@ elms_sum <- sum_turgor %>%
   filter(Species_short %like% "Ulmus")
 # 19 elms
 
+
 desig_sum_turgor <- bind_rows(desig_sum_turgor, elms_sum)
 # 114
-# number of unique species matches the summed df 
 
 ggplotly(ggplot(desig_tlp_dat,aes(x=reorder(Species_short, value), y=value))+
              labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-             geom_boxplot() + ggtitle("Full Data PSI TLP")+
+             geom_boxplot() + ggtitle("Designation List Data PSI TLP")+
              geom_point(aes(
                text = paste(
+                 "<br> PSI TLP:", value,
                  "<br>Cultivar:",Cultivar,
                  "<br>Drought Tolerance:",Drought_tol,
                  "<br>Source Data File:",Source),
@@ -1019,11 +1020,12 @@ ggplotly(ggplot(desig_tlp_dat,aes(x=reorder(Species_short, value), y=value))+
                                    axis.title=element_text(size=10),
                                    legend.position="none")+ coord_flip(), tooltip = "text")
 
-ggplotly(ggplot(tlp_dat,aes(x=reorder(Genus, value), y=value))+
+ggplotly(ggplot(desig_tlp_dat,aes(x=reorder(Genus, value), y=value))+
            labs(x="Genus",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-           geom_boxplot() + ggtitle("Full Data PSI TLP")+
+           geom_boxplot() + ggtitle("Designation List Data PSI TLP")+
            geom_point(aes(
              text = paste(
+               "<br> PSI TLP:", value,
                "<br>Species:",Species_short,
                "<br>Drought Tolerance:",Drought_tol,
                "<br>Source Data File:",Source),
@@ -1036,8 +1038,37 @@ ggplotly(ggplot(tlp_dat,aes(x=reorder(Genus, value), y=value))+
                                  axis.title=element_text(size=10),
                                  legend.position="none")+ coord_flip(), tooltip = "text")
 
+
+#combine data into one cell for the table 
+# this gives weird NA ( NA ) as character strings
+desig_sum_turgor <- desig_sum_turgor %>%  
+  mutate(P50 = paste(Mean_Value_P50, "(", SD_Value_P50, ")"),
+         P88 = paste(Mean_Value_P88, "(", SD_Value_P88, ")"),
+         psi.tlp = paste(Mean_Value_psi.tlp, "(", SD_Value_psi.tlp, ")"),
+         psi.ft = paste(Mean_Value_psi.ft, "(", SD_Value_psi.ft, ")")) %>%
+  select(-2:-11) %>%
+  rename(Species = Species_short)
+# get rid of the weird  NA ( NA ) 
+desig_sum_turgor$P50 <- ifelse(desig_sum_turgor$P50 == "NA ( NA )", NA, desig_sum_turgor$P50)
+desig_sum_turgor$P88 <- ifelse(desig_sum_turgor$P88 == "NA ( NA )", NA, desig_sum_turgor$P88)
+desig_sum_turgor$psi.tlp <- ifelse(desig_sum_turgor$psi.tlp == "NA ( NA )", NA, desig_sum_turgor$psi.tlp)
+desig_sum_turgor$psi.ft <- ifelse(desig_sum_turgor$psi.ft == "NA ( NA )", NA, desig_sum_turgor$psi.ft)
+
+
+desig_sum_turgor <- desig_sum_turgor %>%
+  rename(Species = Species_short)
+desig_sum_turgor <- desig_sum_turgor %>%
+left_join(.,desig)
+
+desig_list$HadData <- desig_list$Species %in% desig_sum_turgor$Species
+
+desig_nodat<- desig_list %>%
+  filter(HadData == FALSE) %>%
+  left_join(.,desig)
+
+desig_sum_turgor <- bind_rows(desig_sum_turgor, desig_nodat)
 # write out csv file for the team
-# write.csv(desig_table_com,"droughtdesignations_table_2024_27June.csv", row.names = F)
+#write.csv(desig_sum_turgor,"droughtdesignations_table_2024_25Sept.csv", row.names = F)
 
 
 # How does our list compare to NITS? --------------------------------------
