@@ -24,6 +24,68 @@ coords<-coords%>%
  separate(USDA_title_23, into = c("Zone_2023", "TempRange_F"), sep = ": ", remove = FALSE)%>%
  mutate(Zone_2023 = str_trim(Zone_2023),TempRange_F=str_trim(TempRange_F))
 
+# Google Sheets -----------------------------------------------------------
+desig<-data.frame(read_sheet(ss="https://docs.google.com/spreadsheets/d/1Ap2zxfzQ2tA7Vw2YFKWG5WlASvh_DakGJGc-i07YDOo/edit#gid=2107989582"))
+2
+desig_list <- desig %>%
+  select(Species) %>%
+  mutate(
+    Species = if_else(Species == "Platanus x acerifolia (syn hispanica)", "Platanus x acerifolia", Species),
+    Species = ifelse(Species == "Acer saccharum ssp nigrum", "Acer nigrum", Species),
+    Species = ifelse(Species == "Larix larcina", "Larix laricina", Species),
+    Species = str_replace(Species,"Alnus incana ssp.rugosa", "Alnus incana ssp rugosa"),
+    Species = str_replace(Species, "Ulmus parviflora", "Ulmus parvifolia")
+  ) %>%
+  filter(!row_number() %in% c(158, 160:162, 176:179)) %>%
+  as.data.frame() %>%
+  rename(Botanical.Name = Species)
+
+
+# Cross Check Designation List with Morton Web List -----------------------------------------------------
+Morton_Web <- data.frame(read_sheet(ss="https://docs.google.com/spreadsheets/d/1LXnWGUHcJwK6vsTBP_VLRDaWmEwbSebb2ma7gDl84e0/edit?gid=221521861#gid=221521861"))
+2
+
+
+desig_list$OnMortonWeb <- ifelse(desig_list$Botanical.Name %in% Morton_Web$Botanical.Name, "x", "desiglist")
+
+Morton_Web <- desig_list %>%
+  filter(OnMortonWeb == "desiglist") %>%
+  bind_rows(Morton_Web)
+
+Morton_Web <- Morton_Web %>%
+  select(!Cultivar, !Variety.Ssp) %>%
+  rename(Species = Botanical.Name) %>%
+  mutate(Species = str_replace(Species,  "Quercus muhlenbergii", "Quercus muehlenbergii"),
+         Species = str_replace(Species, "Cladrastris kentukea", "Cladrastis kentukea"),
+         Species = str_replace(Species, "viburnum lentago","Viburnum lentago")) %>%
+  mutate(CultivarName = ifelse(str_detect(Species, "'"), str_trim(str_split(Species, pattern = "'", simplify = TRUE)[, 2]), NA_character_),
+         CultivarName = ifelse(str_detect(Species, "\""), str_trim(str_split(Species, pattern = "\"", simplify = TRUE)[,2]), CultivarName),
+         SubSpecies = ifelse(str_detect(Species, "ssp\\.?|subsp\\.?"), 
+                             str_trim(str_extract(Species, "(?<=ssp\\.?\\s|subsp\\.?\\s)\\w+")), 
+                             NA_character_),
+         VarietyName = ifelse(str_detect(Species, "var\\.?\\s"), 
+                              str_trim(str_extract(Species, "(?<=var\\.?\\s)\\w+")), 
+                              NA_character_)) %>%
+  # Create a new column with the cleaned species name
+  mutate(SpeciesClean = Species %>%
+           # Step 1: Remove the cultivar (anything in quotes)
+           str_remove("\"[^\"]*\"") %>%
+           # Remove anything in single quotes
+           str_remove("'[^']*'") %>%
+           # Step 2: Remove subspecies (ssp or subsp)
+           str_remove("(ssp\\.?|subsp\\.?)\\s*\\w+") %>%
+           # Step 3: Remove variety (var. or var with a space)
+           str_remove("var\\.?\\s*\\w+") %>%
+           # Step 4: Trim extra spaces left after removal
+           str_trim()) %>%
+  filter(!str_detect(Species, "\\b\\w+\\s+sp\\b") & # drop anything that is just genus sp (ex. diospyros sp.)
+           !str_detect(Species, "(?i)ferns") & # drop all the ferns
+           !str_detect(Species, "^[A-Za-z]+$")) # drop anything that just lists the genus (ex. Eucalyptus)
+
+#desig_list$OnDesList <- "x"
+
+# all of the drought designation species are ALSO on the website already.
+
 # Hirons et al. 2020 data merge with Sjoman Data-------------------------------------------------
 jakedat <- read_csv("Jake summary data.csv") %>%
   mutate(
@@ -32,7 +94,8 @@ jakedat <- read_csv("Jake summary data.csv") %>%
     Species_short = str_trim(if_else(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 1], Species), side = "right"),
     Cultivar = if_else(str_detect(Species, "'"), str_split(Species, pattern = "'", simplify = TRUE)[, 2], NA_character_),
     psi.tlp = round(sum.tlp, 2),
-    psi.ft = round(sum.opft, 2)
+    psi.ft = round(sum.opft, 2),
+    Species = str_replace(Species, "Magnolia x loebneri 'Leonard Messel'", "Magnolia x loebneri 'Messel'")
   ) %>%
   transmute(Species, garden, Reference, Species_short, Cultivar, psi.tlp, psi.ft)
 
@@ -132,20 +195,9 @@ hirons_lon <- hirons_lon %>%
   mutate(Source = "Hirons & Sjoman (2015, 2018, 2020)")
 # 364 
   
-# Google Sheets -----------------------------------------------------------
-desig<-data.frame(read_sheet(ss="https://docs.google.com/spreadsheets/d/1Ap2zxfzQ2tA7Vw2YFKWG5WlASvh_DakGJGc-i07YDOo/edit#gid=2107989582"))
-2
-desig_list <- desig %>%
-  select(Species) %>%
-  mutate(
-    Species = if_else(Species == "Platanus x acerifolia (syn hispanica)", "Platanus x acerifolia", Species),
-    Species_new = Species
-  ) %>%
-  filter(!row_number() %in% c(158, 160:162, 176:179)) %>%
-  as.data.frame()
 
 
-
+hirons_lon <- hirons_lon
 
 # Bartlett data -----------------------------------------------------------
 bartlett <-read.csv("Bartlett 2012 - supplemental data.xlsx - Data.csv", header = T)
@@ -359,10 +411,7 @@ workdata_2 <- workdata_2 %>%
 
 # 5804 obs
 
-#checksource <- TRYdata %>%
-#  select(DatasetID, Reference) %>%
-#  distinct() %>%
-#  write.csv(., "TRY Data Source List.csv", row.names=F)
+
 
 # Choat et al. 2012 data --------------------------------------------------
 
@@ -383,9 +432,6 @@ choat<-choat%>%
          Reference_datfile = "choat")
 #480 obs
 
-
-# Choat - Try merge -------------------------------------------------------
-# list of family names from the data set 
 family<-read.csv("Genus_Choat.csv",header=T)
 family$Family<-trimws(family$Family,"both")
 
@@ -486,175 +532,9 @@ sum(rowSums(result_df[, c("Listed_with_hirons_lon",
 hirons_lon<-hirons_lon %>%
   mutate(Species_short = ifelse(Species_short =="Ulmus",Species,Species_short ))#%>%
 #  left_join(desig_list, by = "Species")
-  
-hirons_lon$Table <- ""
-
-# Loop through each row in test
-for (i in 1:nrow(hirons_lon)) {
-  # Check if the Species names in the test df match any of the 
-  # species names in the drought designation table
-  if (hirons_lon$Species_short[i] %in% desig_list$Species_new) {
-    hirons_lon$Table[i] <- "X"  # Mark 'X' in Table if there's a match
-  }
-}
-# 90
-
-# Include all of the elms
-hirons<-hirons_lon%>%
-  #  mutate(Table=ifelse("Ulmus" %in% Species_new,Table=="X",Table))
-  mutate(Table = ifelse(grepl("ulmus", Species_short, ignore.case = TRUE), "X", Table))
-# 364
-
-hirons<-hirons%>%
-  #filter(Table=="X")%>%
-  mutate(Genus = str_split(Species, " ", simplify = TRUE)[, 1])%>%
-  mutate(Genus = str_trim(Genus))
-# 364 rows
-
-hirons_des<-hirons %>% filter (Table == "X")
-# 172
-hirons_des%>%  
-  filter(Country == "USA") %>%
-  #group_by(Zone_2023)%>%
-  summarise(Count_USDA = length(unique(Species)))
-length(unique(hirons_des$Species[hirons_des$Country=="USA"]))
-# 50 in the USA
-
-hirons_des%>%  
-  filter(Country == "USA") %>%
-#  group_by(Zone_2023)%>%
-  summarise(Count_USDA = length(unique(Species_short)))
-# 45
-
-
-length(unique(hirons_des$Species_short))
-# 73 unique species total (not counting variety)
-length(unique(hirons_des$Species))
-# 79 with cultivar
-length(unique(hirons_des$Genus))
-# 26 unique genera
-length(unique(hirons$Species_short))
-# 160 unique species total (not counting variety)
-length(unique(hirons$Species))
-# 171 species with cultivar
-length(unique(hirons$Genus))
-# 36 unique genera
-
-
-hirons_des%>%
-  filter(Species_short %like% "Ulmus")%>%
-  filter(Country=="USA")%>%
-  summarise(Count = length(unique(Species_short)))
-
-# 19 different elm species in the entire data set
-# all were located in the USA as well.
-
-# Graphing the Ptlp data - 43 species that intersect with our current list
-
-tlp_des<-hirons_des %>%
-  filter(dat.type == "psi.tlp") %>%
-  group_by(Species_short)%>%
-  summarise(Count = length(value),
-            Mean_TLP=mean(value),
-            SD_TLP=sd(value),
-            SE_TLP= sd(value) / sqrt(n())) %>%
-  mutate(Mean_TLP = round(Mean_TLP, 2),SD_TLP = round(SD_TLP,2),
-         SE_TLP=round(SE_TLP,2))%>%
-  left_join(hirons_des)#%>%
-#  filter(Count>1)
-## 73 unique species
-# Old plots of dat in Hirons data
-#ggplotly(ggplot(tlp_des,aes(x=reorder(Species_short, value), y=value))+
-#           labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-#           geom_boxplot() + ggtitle("Drought Designations Species - Hirons")+
-#           theme_classic()+theme(axis.text.y=element_text(color="black",
-#                                                          size=10,vjust=0.5,
-#                                                          hjust=1,face="italic"),
-#                                axis.text.x=element_text(color="black",size=10),
-#                                 axis.ticks=element_line(color="black"),
-#                                axis.title=element_text(size=10),
-#                                 legend.position="none")+ coord_flip()+
-#           geom_point(aes(text = paste("<br>Cultivar:",Cultivar,"<br>Country:",Country),
-#                      col=Exposition)))
-
-
-#ggplotly(ggplot(tlp_des,aes(x=reorder(Genus, value), y=value))+
-#           labs(x="Genera",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-#           geom_boxplot(outlier.color=NA) + ggtitle("Drought Designations Genera - Hirons")+
-#          theme_classic()+theme(axis.text.y=element_text(color="black",
-#                                                         size=10,vjust=0.5,
-#                                                         hjust=1,face="italic"),
-#                                axis.text.x=element_text(color="black",size=10),
-#                                 axis.ticks=element_line(color="black"),
-#                                 axis.title=element_text(size=10),
-#                                legend.position="none")+ coord_flip()+#
-#           geom_point(aes(text = paste("<br>Species:",Species_short,"<br>Cultivar:",Cultivar,"<br>Country:",Country),
-#                          col=Exposition)))
-
-
-# Graphing the Ptlp data - all species Andy had data for
-
-#tlp<-hirons %>%
-#  filter(dat.type == "psi.tlp") %>%
-#  group_by(Species_short)%>%
-#  summarise(Count = length(value),
-#            Mean_TLP=mean(value),
-#            SD_TLP=sd(value),
-#            SE_TLP= sd(value) / sqrt(n())) %>%
-#  mutate(Mean_TLP = round(Mean_TLP, 2),SD_TLP = round(SD_TLP,2),
-#         SE_TLP=round(SE_TLP,2))%>%
-#  left_join(hirons)#%>%
-#  filter(Count>1)
-#ggplotly(ggplot(tlp,aes(x=reorder(Species_short, value), y= value))+
-#           labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-#           geom_boxplot() + ggtitle("Full Species List - Hirons")+
-#           theme_classic()+theme(axis.text.y=element_text(color="black",
-#                                                          size=10,vjust=0.5,
-#                                                          hjust=1,face="italic"),
-#                                 axis.text.x=element_text(color="black",size=10),
-#                                 axis.ticks=element_line(color="black"),
-#                                axis.title=element_text(size=10),
-#                                legend.position="none")+ coord_flip()+
-#           geom_point(aes(text = paste("<br>Cultivar:",Cultivar,"<br>Country:",Country),
-#                          col=Exposition)))
-
-
-#ggplotly(ggplot(tlp,aes(x=reorder(Genus, value), y= value))+
-#           labs(x="Genera",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-#           geom_boxplot() + ggtitle("All Genera - Hirons")+
-#           theme_classic()+theme(axis.text.y=element_text(color="black",
-#                                                          size=10,vjust=0.5,
-#                                                          hjust=1,face="italic"),
-#                                 axis.text.x=element_text(color="black",size=10),
-#                                 axis.ticks=element_line(color="black"),
-#                                 axis.title=element_text(size=10),
-#                                 legend.position="none")+ coord_flip()+
-#           geom_point(aes(text = paste("<br>Species:",Species_short,"<br>Cultivar:",Cultivar,
-#                                       "<br>Country:",Country),
-#                          col=Exposition)))
 
 
 # Combining Data Frames-------------------------------------
-
-# Data with TLP and FT - hirons_lon (long) and subset_l (long)
-# Data with P50 and P88 - choat_try (wide) OR choat_lon (long)
-
-
-# make choat_try long
-#choat_lon <-choat %>%
-# mutate(value = as.numeric(value)) %>%
-# pivot_longer(cols = -c(1:11),
-#              names_to = "dat.type", values_to = "value") %>%
-# rename(Exposition = Location)%>%
-#  filter(!is.na(value))
-
-# We want to see what data we have for what species.
-# Make an ugly, long dataframe that can be summarized.
-
-### 25/3/2024: Start here tomorrow. Looks like the bind_rows did not properly
-# work. Column called dat.type and DataName, not all psi.ft or tlp data
-# is included in the graphs.
-
 
 
 hirons_lon <- hirons_lon %>%
@@ -686,141 +566,90 @@ summary <- combined_long %>%
   summarize(Count = n()) %>%
   pivot_wider(names_from = dat.type, values_from = Count)
 #1225
-summary <- summary %>%
-  mutate(Table = if_else(Species_short %in% desig$Species, "X", ""))
 
 # remove duplicates
+combined_long <- combined_long %>%
+  mutate(Species = ifelse(is.na(Species), Species_short, Species))
 
 combined_long<- combined_long [!duplicated(combined_long[c("Species",
                                                              "Last",
                                                              "dat.type",
                                                              "value")]),]
-# 5966
+
+# 5995
 
 
-# Standardize TLP using Hirons equation -----------------------------------
+
+# Export all References and Sources associated with TLP and FT data for Luke --------
+
+ref_list <- combined_long %>%
+  filter(dat.type == "psi.ft" | dat.type == "psi.tlp") %>%
+  select(Reference) %>%
+  distinct()# %>%
+#  write.csv(.,"Turgor_Reference List.csv", row.names=F)
+
+source_list <- combined_long %>%
+  filter(dat.type == "psi.ft" | dat.type == "psi.tlp") %>%
+  select(Source) %>% 
+  distinct() #%>%
+# write.csv(.,"Turgor_Source List.csv", row.names = F)
+
+
+
+# Export Species List -----------------------------------------------------
+
+species_list <- combined_long %>%
+  filter(dat.type %like% "psi") %>%
+  select(Species, Species_short) %>% distinct()
+
+Morton_Web <- data.frame(read_sheet(ss="https://docs.google.com/spreadsheets/d/1LXnWGUHcJwK6vsTBP_VLRDaWmEwbSebb2ma7gDl84e0/edit?gid=221521861#gid=221521861"))
+
+Morton_species <- Morton_Web %>%
+  select(Botanical.Name) %>%
+  rename(Species = Botanical.Name)
+
+
+NITS <- read.csv("NITS_plantlist.csv",header=T)
+
+species_list <- bind_rows(species_list, Morton_species, NITS)
+
+species_list$Species<-trimws(species_list$Species,"both")
+
+species_list <- species_list %>%
+  select(Species) %>% distinct() #%>% 
+ # write.csv(.,"all_species.csv", row.names=F) 
+# 777 obs  
+
+
+  # Standardize TLP using Hirons equation -----------------------------------
+
 
 all_dat_hirons_tlp <- combined_long %>%
   filter(dat.type == "psi.ft") %>% 
   rename(psi.ft = value) %>%
   select(-dat.type) %>%
   mutate(hirons_psi.tlp = -0.2554 + (1.1243 * psi.ft)) %>% # Equation from Hirons et al. 2020
-  pivot_longer(.,cols = -c(1:12,14:31), 
+  pivot_longer(.,cols = -c(1:12,14:30), 
              names_to = "dat.type",
              values_to = "value") %>%
   filter(.,dat.type == "hirons_psi.tlp")
 
-# 949 psi.ft values
+# 964 psi.ft values
 
 all_dat <- bind_rows(combined_long, all_dat_hirons_tlp)
-
-all_dat_bartlett_tlp <- combined_long %>%
-  filter(dat.type == "psi.ft") %>% 
-  rename(psi.ft = value) %>%
-  select(-dat.type) %>%
-  mutate(bartlett_psi.tlp = -0.2554 + (1.1243 * psi.ft)) %>% # Equation from Hirons et al. 2020
-  pivot_longer(.,cols = -c(1:12,14:31), 
-               names_to = "dat.type",
-               values_to = "value") %>%
-  filter(.,dat.type == "bartlett_psi.tlp")
-
-# 949 psi.ft values
-
-# Next steps. Calculate TLP from the FT values where needed. Intersect the species
-# list with the drought designations table and populate columns where data exists. 
-
-# Calculating PSI TLP from PSI FT -----------------------------------------
-
-# Using the equation Andy Hirons used, we are calculating PSI TLP from PSI FT
-# only for the plants with values recorded for either the petiole or leaf
-sus <- combined_long %>%
-  filter(value > -20 & value <= 0) %>%
-  filter(Plant_organ == "P" | Plant_organ == "L")
-# 1749
-
-turgorpt <- sus %>%
-  filter(dat.type == "psi.tlp" | dat.type == "psi.ft") %>% 
-  select(Species_short, dat.type, value, Source, Reference, Reference_datfile,Plant_organ)# %>%
-# 1597
-
-# figure out what species I have psi.ft values for and not tlp values.
-df_calc <- turgorpt %>%
-  group_by(Species_short, dat.type, Reference, Source, Reference_datfile) %>%
-  summarise(num_values = n()) %>%
-  pivot_wider(names_from = dat.type, values_from = num_values) %>%
-  filter(is.na(psi.tlp)) %>%
-  select(Species_short, Reference, Source, Reference_datfile) %>% # 58 entries with ft and not tlp
-  inner_join(., combined_long, by = c("Species_short", "Reference", "Source", "Reference_datfile")) %>%
-  filter(dat.type == "psi.ft") # 304
-### stop here....SEARCH for me
-tlp_dat <- df_calc %>%
-  rename(psi.ft = value) %>%
-  select(-dat.type) %>%
-  mutate(psi.tlp = -0.2554 + (1.1243 * psi.ft)) %>% # Calculation from Hirons et al 2020
-  pivot_longer(.,cols = -c(1:12,14:31), 
-               names_to = "dat.type",
-               values_to = "value") %>%
-  filter(.,dat.type == "psi.tlp")
-
-# long data frame with TLP and FT values and corresponding metadata.
-# need to combine this back with the "sus" data frame
-# i think it worked
- 
-# repeat for full turgor data
-
-#df_calc_ft <- turgorpt %>%
-#  group_by(Species_short, dat.type) %>%
-#  summarise(num_values = n()) %>%
-#  pivot_wider(names_from = dat.type, values_from = num_values) %>%
-#  filter(is.na(psi.ft)) %>%
-# select(Species_short) %>% # 231 species with tlp and not ft
-#  inner_join(., combined_long, by = "Species_short") %>%
-#  filter(dat.type == "psi.tlp") #  239
-
-#ft_dat <- df_calc_ft %>%
-#  rename(psi.tlp = value) %>%
-#  select(-dat.type) %>%
-#  mutate(psi.ft = (psi.tlp+0.2554)/1.1243) #%>% # Calculation from Hirons et al 2020
-# 239
-#ft_dat<- ft_dat %>%
-#  pivot_longer(cols = -c(1:11,13:25), 
-#               names_to = "dat.type",
-#               values_to = "value") 
-# 478
-#ft_dat <- ft_dat %>%
-#  filter(dat.type == "psi.ft") # 239
-
-
-
-
-turgor_dat <- bind_rows(tlp_dat, combined_long) # bind rows to add back in new calculated data
-# 6292 rows
-turgor_dat <- turgor_dat %>%
-  distinct() #
-# 6292
-
-# Read out a file for Deb of psi tlp and psi ft data
-
-#deb <- turgor_dat %>%
-#  filter(dat.type == "psi.tlp",Plant_organ == "P" | Plant_organ == "L" | is.na(Plant_organ)) %>%
-#  write.csv("droughtdesignations_data_DebDuong_20240726.csv", row.names = F)
-
-
-# double check what is duplicated.
-duplicated_rows <- duplicated(turgor_dat)
-# Select duplicated rows from 'sus'
-duplicated_sus <- turgor_dat[duplicated_rows, ]
-
+# 6959
 
 
 # Full DataSet Designations -----------------------------------------------
 
-turgor_dat <- turgor_dat %>%
+
+
+turgor_dat <- all_dat %>%
   mutate(value = ifelse(value > 0, (value*-1), value),
          Genus = str_split(Species_short, " ", simplify = TRUE)[, 1])%>%
            mutate(Genus = str_trim(Genus)) %>%
   filter(value > -20 & value < 0)
-# 6199
+# 6734
 #
 turgor_dat <- turgor_dat %>%
   mutate(Reference = ifelse(OriglName == "Choat et al. 2012 reported ?50 (MPa)", "Choat et al. 2012", Reference),
@@ -828,26 +657,117 @@ turgor_dat <- turgor_dat %>%
          Cultivar = ifelse(Species_short == 'Maclura pomifera "white shield"', "White Shield", Cultivar),
          Genus = ifelse(!is.na(Cultivar) & Genus == "Ulmus", "Ulmus Cultivar", Genus),
          Dataset = ifelse(is.na(Dataset), Source, Dataset))
+
+turgor_dat$Source <-str_replace(turgor_dat$Source, "Choat et al. 2007","Choat B, Sack L, Holbrook NM., 2007, New Phytologist, 175, 686-698")
+turgor_dat$Source <- str_replace(turgor_dat$Source, "Hao et al. 2010", "Hao G-Y, Sack L, Wang A-Y, Cao K-F, Goldstein G, 2010, Functional Ecology, 24, 731-740")
+turgor_dat$Source <- str_replace(turgor_dat$Source,"Sack L, Cowan PD, Jaikumar NJ, Holbrook NM. 2003., 2003, Plant, Cell & Environment, 26, 1343-1356", "Sack L, Cowan PD, Jaikumar NJ, Holbrook NM., 2003, Plant, Cell & Environment, 26, 1343-1356")
+turgor_dat$Source <- str_replace(turgor_dat$Source, "Scoffoni et al. 2008", "Scoffoni C, Pou A, Aasamaa K, Sack L., 2008, Plant, Cell & Environment, 13, 1803-1812")
+
 turgor_dat$Species_short <- str_replace(turgor_dat$Species_short, 'Maclura pomifera "white shield"', "Maclura pomifera")
+turgor_dat$Species <- str_replace(turgor_dat$Species, 'Pseudotsuga menziesii', "Psuedotsuga menziesii")
+turgor_dat$Species <- str_replace(turgor_dat$Species, 'Magnolia loebneri_x', 'Magnolia loebneri')
 
 
-# change Maclura pomifera "White Shield" to just Maclura pomifera
-# change all elm cultivars to "Ulmus cultivars"
+turgor_dat <- turgor_dat %>%
+  mutate(CultivarName = ifelse(str_detect(Species, "'"), str_trim(str_split(Species, pattern = "'", simplify = TRUE)[, 2]), NA_character_),
+         CultivarName = ifelse(str_detect(Species, "\""), str_trim(str_split(Species, pattern = "\"", simplify = TRUE)[,2]), CultivarName),
+         SubSpecies = ifelse(str_detect(Species, "ssp\\.?|subsp\\.?"), 
+                            str_trim(str_extract(Species, "(?<=ssp\\.?\\s|subsp\\.?\\s)\\w+")), 
+                            NA_character_),
+         VarietyName = ifelse(str_detect(Species, "var\\.?\\s"), 
+                              str_trim(str_extract(Species, "(?<=var\\.?\\s)\\w+")), 
+                              NA_character_)) %>%
+  # Create a new column with the cleaned species name
+  mutate(SpeciesClean = Species %>%
+           # Step 1: Remove the cultivar (anything in quotes)
+          str_remove("\"[^\"]*\"") %>%
+           # Remove anything in single quotes
+          str_remove("'[^']*'") %>%
+          # Step 2: Remove subspecies (ssp or subsp)
+          str_remove("(ssp\\.?|subsp\\.?)\\s*\\w+") %>%
+          # Step 3: Remove variety (var. or var with a space)
+          str_remove("var\\.?\\s*\\w+") %>%
+          # Step 4: Trim extra spaces left after removal
+          str_trim()) %>%
+  filter(!str_detect(Species, "\\b\\w+\\s+sp\\b") & # drop anything that is just genus sp (ex. diospyros sp.)
+           !str_detect(Species, "(?i)ferns") & # drop all the ferns
+           !str_detect(Species, "^[A-Za-z]+$")) %>% # drop anything that just lists the genus (ex. Eucalyptus)
+  select(!Species_short) %>%
+  mutate(OnMortonWeb = ifelse(SpeciesClean %in% Morton_Web$SpeciesClean, "x", NA_character_),
+         SpeciesClean = ifelse(grepl("^\\S+$", SpeciesClean), Species, SpeciesClean),
+         SpeciesClean = ifelse(SpeciesClean == "Magnolia x kewensis s Memory'", "Magnolia x kewensis", SpeciesClean),
+         CultivarName = ifelse(CultivarName == "Wada'", "Wada's Memory", CultivarName),
+         OnMortonWeb = ifelse(Genus == "Ulmus cultivar", "x", OnMortonWeb))
 
+
+# 6643
+
+# Standardize Plant Names - SKIP FOR NOW -------------------------------------------------
+
+#WFO_names <- read.csv("WFO_names.csv",header=T)
+
+#WFO_names <- WFO_names %>%
+#  select(Submitted_Name, Accepted_SPNAME) %>% distinct() %>%
+#  select(Species_short)
+## 1179 names.
+
+
+# take the mean of each source, then take the mean of that to get to species,
+# then take the mean of that to get to genus. 
 # calculate mean and SD for each species based on data type
-sum_turgor<- turgor_dat%>%
-  filter(Plant_organ == "L") %>%
-  group_by(Species_short, dat.type) %>%
-  select(Species_short,dat.type, value) %>%
-  mutate(Mean_Value = round(mean(value),2),
-         SD_Value = round(sd(value),2),
-         Count = n()  # Calculate the count of points in each group
-  )%>%
-  select(-value) %>%
-  distinct(.) %>% 
-  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value, Count)) 
-# 1186
-# 631 if I take out the NAs.
+all_sum_turgor <- turgor_dat %>%
+  filter(Plant_organ == "L" & dat.type == "hirons_psi.tlp") %>%
+  select(SpeciesClean, Source, value, dat.type) %>%
+  group_by(SpeciesClean, Source) %>%
+  mutate(
+    Mean_TLP_Value_Source = round(mean(value), 2),  # Calculate mean for each group
+    SE_TLP_Value_Source = round((sd(value) / sqrt(length(value))), 2)) %>%   # Calculate standard error
+  ungroup()  %>%  # Ungroup if you're planning further joins or grouping steps
+  right_join(.,turgor_dat) 
+
+all_sum_turgor <- all_sum_turgor %>%
+  filter(Plant_organ == "L" & dat.type == "hirons_psi.tlp") %>%
+  select(SpeciesClean, Mean_TLP_Value_Source, dat.type, SE_TLP_Value_Source) %>%
+  distinct() %>%
+  group_by(SpeciesClean) %>%
+  mutate(Mean_TLP_Value_Species = round(mean(Mean_TLP_Value_Source), 2),     # Calculate mean for each group
+    SE_TLP_Value_Species = round((sd(Mean_TLP_Value_Source) / sqrt(length(Mean_TLP_Value_Source))), 2))%>%   # Calculate standard error
+  ungroup() %>%
+  right_join(.,all_sum_turgor) 
+
+all_sum_turgor <- all_sum_turgor %>%
+  filter(Plant_organ == "L" & dat.type == "hirons_psi.tlp") %>%
+  select(Genus, Mean_TLP_Value_Species, dat.type) %>%
+  distinct() %>%
+  group_by(Genus) %>%
+  mutate(Mean_TLP_Value_Genus = round(mean(Mean_TLP_Value_Species), 2),                    # Calculate mean for each group
+         SE_TLP_Value_Genus = round((sd(Mean_TLP_Value_Species) / sqrt(length(Mean_TLP_Value_Species))), 2)   # Calculate standard error
+  ) %>%
+  ungroup() %>%
+  right_join(all_sum_turgor)
+
+
+all_sum_turgor$Drought_tol_source <- ifelse(all_sum_turgor$Mean_TLP_Value_Source > -2.5, "Sensitive",
+                                          ifelse((all_sum_turgor$Mean_TLP_Value_Source >= -3 & all_sum_turgor$Mean_TLP_Value_Source <= -2.5), "Moderately Sensitive",
+                                                 ifelse((all_sum_turgor$Mean_TLP_Value_Source >= -3.5 & all_sum_turgor$Mean_TLP_Value_Source < -3), "Moderately Tolerant",
+                                                        ifelse(all_sum_turgor$Mean_TLP_Value_Source < -3.5, "Tolerant", NA))))
+
+
+
+# if else statements to create column of assigned drought designations using the above parameters
+all_sum_turgor$Drought_tol_spec <- ifelse(all_sum_turgor$Mean_TLP_Value_Species > -2.5, "Sensitive",
+                                          ifelse((all_sum_turgor$Mean_TLP_Value_Species >= -3 & all_sum_turgor$Mean_TLP_Value_Species <= -2.5), "Moderately Sensitive",
+                                                 ifelse((all_sum_turgor$Mean_TLP_Value_Species >= -3.5 & all_sum_turgor$Mean_TLP_Value_Species < -3), "Moderately Tolerant",
+                                                        ifelse(all_sum_turgor$Mean_TLP_Value_Species < -3.5, "Tolerant", NA))))
+
+# sum turgor no longer has p12, p50 or p88 data summary. To make the following code work,
+# need to redo sum_turgor and change grouping variable or filter.
+
+all_sum_turgor$Drought_tol_Genus <- ifelse(all_sum_turgor$Mean_TLP_Value_Genus > -2.5, "Sensitive",
+                                 ifelse((all_sum_turgor$Mean_TLP_Value_Genus >= -3 & all_sum_turgor$Mean_TLP_Value_Genus <= -2.5), "Moderately Sensitive",
+                                        ifelse((all_sum_turgor$Mean_TLP_Value_Genus >= -3.5 & all_sum_turgor$Mean_TLP_Value_Genus < -3), "Moderately Tolerant",
+                                               ifelse(all_sum_turgor$Mean_TLP_Value_Genus < -3.5, "Tolerant", NA))))
+
 
 # TDAG associations for Psi turgor loss point
 # Sensitive: > -2.5 MPa
@@ -855,107 +775,107 @@ sum_turgor<- turgor_dat%>%
 # Moderately Tolerant -3 MPa to -3.5 MPa
 # Tolerant < -3.5 MPa
 
-# if else statements to create column of assigned drought designations using the above parameters
-sum_turgor$Drought_tol <- ifelse(sum_turgor$Mean_Value_psi.tlp > -2.5, "Sensitive",
-                                  ifelse((sum_turgor$Mean_Value_psi.tlp >= -3 & sum_turgor$Mean_Value_psi.tlp <= -2.5), "Moderately Sensitive",                                         ifelse((sum_turgor$Mean_Value_psi.tlp >= -3.5 & sum_turgor$Mean_Value_psi.tlp < -3), "Moderately Tolerant",
-                                                ifelse(sum_turgor$Mean_Value_psi.tlp < -3.5, "Tolerant", NA))))
+
+
+
+# Looking at P12, P50, P88 - do not run - is broken -----------------------
 
 
 # Plot P12/P50/P88 against PSI TLP to see if there is any relationship 
-ggplotly(ggplot(sum_turgor,aes(x=Mean_Value_psi.tlp, y= Mean_Value_P12))+
-           labs(x="Mean PSI TLP",y="Mean P12") +
-           geom_point(aes(
-             text = paste("<br>Species:", Species_short,
-                          "<br>Mean P12:", Mean_Value_P12,
-                          "<br>SD P12:",SD_Value_P12,
-                          "<br>Mean PSI TLP:", Mean_Value_psi.tlp,
-                          "<br>SD PSI TLP:",SD_Value_psi.tlp))) +
-             ggtitle("P12 ~ PSI TLP")+ geom_smooth(method = "lm",se = F)+
-  lims(x=c(-3,-1), y=c(-4,0)) +
-  theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                 size=10,vjust=0.5,
-                                                 hjust=1,face="italic"),
-                        axis.text.x=element_text(color="black",size=10),
-                        axis.ticks=element_line(color="black"),
-                        axis.title=element_text(size=10),
-                        legend.position="none"), tooltip = "text") 
+#ggplotly(ggplot(sum_turgor,aes(x=Mean_Value_psi.tlp, y= Mean_Value_P12))+
+#           labs(x="Mean PSI TLP",y="Mean P12") +
+#           geom_point(aes(
+#             text = paste("<br>Species:", Species_short,
+#                          "<br>Mean P12:", Mean_Value_P12,
+#                          "<br>SD P12:",SD_Value_P12,
+#                         "<br>Mean PSI TLP:", Mean_Value_psi.tlp,
+#                          "<br>SD PSI TLP:",SD_Value_psi.tlp))) +
+#             ggtitle("P12 ~ PSI TLP")+ geom_smooth(method = "lm",se = F)+
+#  lims(x=c(-3,-1), y=c(-4,0)) +
+#  theme_classic()+theme(axis.text.y=element_text(color="black",
+#                                                size=10,vjust=0.5,
+##                                                 hjust=1,face="italic"),
+#                        axis.text.x=element_text(color="black",size=10),
+#                        axis.ticks=element_line(color="black"),
+#                        axis.title=element_text(size=10),
+#                        legend.position="none"), tooltip = "text") ##
 
 
-cor.test(sum_turgor$Mean_Value_psi.tlp, sum_turgor$Mean_Value_P12, method ="spearman") # r = 0.5
-cor.test(sum_turgor$Mean_Value_psi.tlp, sum_turgor$Mean_Value_P50, method ="spearman") # r = 0.23, p = 0.005
-cor.test(sum_turgor$Mean_Value_psi.tlp, sum_turgor$Mean_Value_P88, method ="spearman") # r = 0.24, p = 0.1391
+#cor.test(sum_turgor$Mean_Value_psi.tlp, sum_turgor$Mean_Value_P12, method ="spearman") # r = 0.5
+#cor.test(sum_turgor$Mean_Value_psi.tlp, sum_turgor$Mean_Value_P50, method ="spearman") # r = 0.23, p = 0.005
+#cor.test(sum_turgor$Mean_Value_psi.tlp, sum_turgor$Mean_Value_P88, method ="spearman") # r = 0.24, p = 0.1391#
 
-shapiro.test(sum_turgor$Mean_Value_psi.tlp) # not normal
-shapiro.test(sum_turgor$Mean_Value_P12) # not normal
-shapiro.test(sum_turgor$Mean_Value_P50)# not normal
-shapiro.test(sum_turgor$Mean_Value_P88) #
+#shapiro.test(sum_turgor$Mean_Value_psi.tlp) # not normal
+#shapiro.test(sum_turgor$Mean_Value_P12) # not normal
+#shapiro.test(sum_turgor$Mean_Value_P50)# not normal
+#shapiro.test(sum_turgor$Mean_Value_P88) #
 
-ggplotly(ggplot(sum_turgor,aes(x=Mean_Value_psi.tlp, y= Mean_Value_P50))+
-           labs(x="Mean PSI TLP",y="Mean P50") +
-           geom_point(aes(
-             text = paste("<br>Species:", Species_short,
-                          "<br>Mean P50:", Mean_Value_P50,
-                          "<br>SD P50:",SD_Value_P50,
-                          "<br>Mean PSI TLP:", Mean_Value_psi.tlp,
-                          "<br>SD PSI TLP:",SD_Value_psi.tlp)))+
-           geom_smooth(method = "lm",se = F)+
-           lims(x=c(-5,0), y=c(-10,0)) +
-           ggtitle("P50 ~ PSI TLP")+ geom_text(x=-4.5, y= -9, label = "r = 0.23", parse =T)+
-           theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                          size=10,vjust=0.5,
-                                                          hjust=1,face="italic"),
-                                 axis.text.x=element_text(color="black",size=10),
-                                 axis.ticks=element_line(color="black"),
-                                 axis.title=element_text(size=10),
-                                 legend.position="none"), tooltip = "text") 
+#ggplotly(ggplot(sum_turgor,aes(x=Mean_Value_psi.tlp, y= Mean_Value_P50))+
+#           labs(x="Mean PSI TLP",y="Mean P50") +
+#           geom_point(aes(
+#             text = paste("<br>Species:", Species_short,
+#                          "<br>Mean P50:", Mean_Value_P50,
+#                          "<br>SD P50:",SD_Value_P50,
+#                          "<br>Mean PSI TLP:", Mean_Value_psi.tlp,
+#                          "<br>SD PSI TLP:",SD_Value_psi.tlp)))+
+#           geom_smooth(method = "lm",se = F)+
+#           lims(x=c(-5,0), y=c(-10,0)) +
+#           ggtitle("P50 ~ PSI TLP")+ geom_text(x=-4.5, y= -9, label = "r = 0.23", parse =T)+
+#           theme_classic()+theme(axis.text.y=element_text(color="black",
+#                                                          size=10,vjust=0.5,
+#                                                          hjust=1,face="italic"),
+#                                 axis.text.x=element_text(color="black",size=10),
+#                                 axis.ticks=element_line(color="black"),
+#                                 axis.title=element_text(size=10),
+#                                 legend.position="none"), tooltip = "text") #
 
-ggplotly(ggplot(sum_turgor,aes(x=Mean_Value_psi.tlp, y= Mean_Value_P88))+
-           labs(x="Mean PSI TLP",y="Mean P88") +
-           geom_point(aes(
-             text = paste("<br>Species:", Species_short,
-                          "<br>Mean P88:", Mean_Value_P88,
-                          "<br>SD P88:",SD_Value_P88,
-                          "<br>Mean PSI TLP:", Mean_Value_psi.tlp,
-                          "<br>SD PSI TLP:",SD_Value_psi.tlp))) + 
-           geom_smooth(method = "lm",se = F)+
-           lims(x=c(-5,0), y=c(-15,0)) +
-           ggtitle("P88 ~ PSI TLP") + geom_text(x=-4.5, y= -14, label = "r = 0.24", parse =T) +
-           theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                          size=10,vjust=0.5,
-                                                          hjust=1,face="italic"),
-                                 axis.text.x=element_text(color="black",size=10),
-                                 axis.ticks=element_line(color="black"),
-                                 axis.title=element_text(size=10),
-                                 legend.position="none"), tooltip = "text") 
+#ggplotly(ggplot(sum_turgor,aes(x=Mean_Value_psi.tlp, y= Mean_Value_P88))+
+#           labs(x="Mean PSI TLP",y="Mean P88") +
+#           geom_point(aes(
+#            text = paste("<br>Species:", Species_short,
+#                          "<br>Mean P88:", Mean_Value_P88,
+#                          "<br>SD P88:",SD_Value_P88,
+#                          "<br>Mean PSI TLP:", Mean_Value_psi.tlp,
+#                         "<br>SD PSI TLP:",SD_Value_psi.tlp))) + 
+#           geom_smooth(method = "lm",se = F)+
+#           lims(x=c(-5,0), y=c(-15,0)) +
+#          ggtitle("P88 ~ PSI TLP") + geom_text(x=-4.5, y= -14, label = "r = 0.24", parse =T) +
+#           theme_classic()+theme(axis.text.y=element_text(color="black",
+#                                                          size=10,vjust=0.5,
+#                                                          hjust=1,face="italic"),
+#                                 axis.text.x=element_text(color="black",size=10),
+#                                 axis.ticks=element_line(color="black"),
+#                                 axis.title=element_text(size=10),
+#                                 legend.position="none"), tooltip = "text") 
 
-# create plots by species - bar plot
 
-tlp_dat <- sum_turgor %>% 
-  select(Species_short,Drought_tol) %>%
-  full_join(turgor_dat) %>%
-  filter(dat.type == "psi.tlp" & Plant_organ == "L") %>%
-  group_by(Dataset, Species_short) %>%
-  mutate(psi.tlp_avg = round(mean(value),2),
-         Count = n()) %>%
-  select(Species_short, Drought_tol, Source, Source_file, Genus, psi.tlp_avg, Count) %>%
-  distinct()
+
+# Barplots by Species -----------------------------------------------------
 
 ## edited this to average across a study. 26 Sept 2024
 ## Left off here. I THINK this is working the way we want? At least in terms of 
 # all species & all points (with each point an average across a study)
 
-ggplotly(ggplot(tlp_dat,aes(x=reorder(Species_short, psi.tlp_avg), y=psi.tlp_avg))+
+# boxplot
+
+spec_box <- all_sum_turgor %>% filter(dat.type == "hirons_psi.tlp") %>%
+  select(SpeciesClean, Mean_TLP_Value_Source, 
+         Source, Drought_tol_spec, 
+         Drought_tol_source) %>% distinct()
+
+ggplotly(ggplot(spec_box,aes(x=reorder(SpeciesClean, Mean_TLP_Value_Source), y=Mean_TLP_Value_Source))+
            labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-           geom_boxplot() + ggtitle("Full Data PSI TLP")+
+           geom_boxplot() + ggtitle("All Data")+
            geom_point(aes(
              text = paste(
-               "<br>Species:",Species_short,
-              # "<br>Cultivar:", Cultivar,
-               "<br>Drought Tolerance:",Drought_tol,
-               "<br>psi TLP:", psi.tlp_avg,
-               "<br>Count:", Count,
+               "<br>Species:",SpeciesClean,
+               #"<br>Cultivar:", CultivarName,
+               "<br> Avg Species Level Drought Tolerance:",Drought_tol_spec,
+               "<br> Source Level Drought Tolerance:", Drought_tol_source,
+               "<br>psi TLP:", Mean_TLP_Value_Source,
+               #"<br>Count:", Count,
                "<br>Source Data File:",Source),
-                          col=Drought_tol)) +
+                          col=Drought_tol_source)) +
            theme_classic()+theme(axis.text.y=element_text(color="black",
                                                           size=10,vjust=0.5,
                                                           hjust=1,face="italic"),
@@ -964,18 +884,51 @@ ggplotly(ggplot(tlp_dat,aes(x=reorder(Species_short, psi.tlp_avg), y=psi.tlp_avg
                                 axis.title=element_text(size=10),
                                  legend.position="none")+ coord_flip(), tooltip = "text")
 
-ggplotly(ggplot(tlp_dat,aes(x=reorder(Genus, psi.tlp_avg), y= psi.tlp_avg))+
-           labs(x="Genus",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-           geom_boxplot() + ggtitle("Full Data PSI TLP")+
+
+spec_bar <- all_sum_turgor %>% filter(dat.type == "hirons_psi.tlp") %>%
+  select(SpeciesClean, Mean_TLP_Value_Species, Drought_tol_spec, SE_TLP_Value_Species) %>% distinct()
+
+# species barplot
+ggplotly(ggplot(spec_bar, aes(x=reorder(SpeciesClean, Mean_TLP_Value_Species), 
+                       y = Mean_TLP_Value_Species), color = Drought_tol_spec) +
+           labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
+           geom_bar(stat = "identity", 
+                    aes(
+                      text = paste(
+                        "<br>Species:",SpeciesClean,
+                        # "<br>Cultivar:", Cultivar,
+                        "<br>Species Drought Tolerance:",Drought_tol_spec,
+                        "<br>Mean psi TLP:",  Mean_TLP_Value_Species,
+                        "<br>SE psi TLP:", SE_TLP_Value_Species),
+                      col=Drought_tol_spec)) + ggtitle("All Data") +
+           geom_pointrange(aes(x = SpeciesClean, ymin = Mean_TLP_Value_Species -SE_TLP_Value_Species, 
+                              ymax =  Mean_TLP_Value_Species + SE_TLP_Value_Species),
+                          width=0.4, colour = "black", alpha=0.75, size = 0.5) + 
+           coord_flip() +
+           theme_classic() + 
+           theme(axis.text.y=element_text(color = "black", size = 10, vjust = 0.5, hjust = 1, face = "italic"),
+                                 axis.text.x = element_text(color = "black", size = 10),
+                                 axis.ticks = element_line(color = "black"),
+                                 axis.title = element_text(size = 10),
+                 legend.position = "none")+ coord_flip(), tooltip = "text")
+
+
+gen_box <- all_sum_turgor %>% filter(dat.type == "hirons_psi.tlp") %>%
+  select(Genus, SpeciesClean, Mean_TLP_Value_Species, SE_TLP_Value_Species,Drought_tol_spec,Drought_tol_Genus) %>% distinct()
+
+# genus boxplot
+ggplotly(ggplot(gen_box,aes(x=reorder(Genus, Mean_TLP_Value_Species),
+                            y= Mean_TLP_Value_Species))+
+           labs(x="Genera",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
+           geom_boxplot() + ggtitle("All Data - Genera")+
            geom_point(aes(
              text = paste(
-               "<br>Species:",Species_short,
-               #"<br>Cultivar:", Cultivar,
-               "<br>Drought Tolerance:",Drought_tol,
-               "<br>psi TLP:", psi.tlp_avg,
-               "<br>Count:", Count,
-               "<br>Source Data File:",Source),
-                          col=Drought_tol)) +
+               "<br>Species:",SpeciesClean,
+               "<br>Species Level Drought Tolerance:",Drought_tol_spec,
+               "<br>Genus Level Drought Tolerance:", Drought_tol_Genus,
+               "<br>psi TLP:", Mean_TLP_Value_Species,
+               "<br>SE psi TLP:", SE_TLP_Value_Species),
+                          col=Drought_tol_spec)) +
            theme_classic()+theme(axis.text.y=element_text(color="black",
                                                           size=10,vjust=0.5,
                                                           hjust=1,face="italic"),
@@ -983,6 +936,32 @@ ggplotly(ggplot(tlp_dat,aes(x=reorder(Genus, psi.tlp_avg), y= psi.tlp_avg))+
                                  axis.ticks=element_line(color="black"),
                                  axis.title=element_text(size=10),
                                  legend.position="none")+ coord_flip(), tooltip = "text")
+
+gen_bar <- all_sum_turgor %>% filter(dat.type == "hirons_psi.tlp") %>%
+  select(Genus, Mean_TLP_Value_Genus, Drought_tol_Genus, SE_TLP_Value_Genus) %>% distinct()
+
+# genus barplot
+ggplotly(ggplot(gen_bar, aes(x=reorder(Genus, Mean_TLP_Value_Genus),
+                                    y= Mean_TLP_Value_Genus), color = Drought_tol_Genus) +
+           labs(x="Genera",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
+           geom_bar(stat = "identity", 
+                    aes(
+                      text = paste(
+                        "<br>Genus:",Genus,
+                        "<br>Genera Level Drought Tolerance:",Drought_tol_Genus,
+                        "<br>Mean psi TLP:", Mean_TLP_Value_Genus,
+                        "<br>SE psi TLP:", SE_TLP_Value_Genus),
+                      col=Drought_tol_Genus)) + ggtitle("All Data - Genera") +
+           geom_pointrange(aes(x = Genus, ymin = Mean_TLP_Value_Genus - SE_TLP_Value_Genus, 
+                               ymax = Mean_TLP_Value_Genus + SE_TLP_Value_Genus),
+                           width=0.4, colour = "black", alpha=0.75, size = 0.5) + 
+           coord_flip() +
+           theme_classic() + 
+           theme(axis.text.y=element_text(color = "black", size = 10, vjust = 0.5, hjust = 1, face = "italic"),
+                 axis.text.x = element_text(color = "black", size = 10),
+                 axis.ticks = element_line(color = "black"),
+                 axis.title = element_text(size = 10),
+                 legend.position = "none")+ coord_flip(), tooltip = "text")
 
 
 # Full Data Set Question: How many references do into this data set?
@@ -997,30 +976,12 @@ ref <- turgor_dat %>%
 # 1034 rows of data with just psi.tlp
 length(unique(ref$Plant_organ))
 
-# Intersect and Update Designation Table ----------------------------------
-
-turgor_dat <- turgor_dat %>%
-  mutate(value = ifelse(value > 0, (value*-1), value),
-         Genus = str_split(Species_short, " ", simplify = TRUE)[, 1])%>%
-  mutate(Genus = str_trim(Genus)) %>%
-  filter(value > -20 & value < 0)
-# 6199
 
 
 
+# Just TMA Website Trees --------------------------------------------------
+# For Just trees on Web
 # calculate mean and SD for each species based on data type
-sum_turgor<- turgor_dat%>%
-  filter(Plant_organ == "P" | Plant_organ == "L" | is.na(Plant_organ)) %>%
-  group_by(Species_short, dat.type) %>%
-  select(Species_short,dat.type, value) %>%
-  mutate(Mean_Value = round(mean(value),2),
-         SD_Value = round(sd(value),2),
-         Count = n()  # Calculate the count of points in each group
-  )%>%
-  select(-value) %>%
-  distinct(.) %>% 
-  pivot_wider(.,names_from = dat.type, values_from = c(Mean_Value,SD_Value, Count)) 
-# 1186
 
 # TDAG associations for Psi turgor loss point
 # Sensitive: > -2.5 MPa
@@ -1029,82 +990,61 @@ sum_turgor<- turgor_dat%>%
 # Tolerant < -3.5 MPa
 
 
-## need to use pivot_wider above to get this output to work
-# I wanted to create a faceted graph to look at the relationship between psi.tlp and 
-# P50 and P88, so I have left it out for now.
+Morton_sum_turgor<- turgor_dat%>%
+  filter(Plant_organ == "L" & dat.type == "hirons_psi.tlp" & OnMortonWeb == "x") %>%
+ # bind_rows(., ElmCultivar) %>%
+  group_by(SpeciesClean, dat.type, Source) %>%
+  select(SpeciesClean, dat.type, value) %>%
+  mutate(Mean_Value = round(mean(value),2)) %>%
+  ungroup() %>%
+  select(-Source, -value, -dat.type) %>%
+  distinct() %>%
+  group_by(SpeciesClean) %>%
+  mutate(Mean_Value_hirons_psi.tlp = round(mean(Mean_Value),2),
+         SE_Value_hirons_psi.tlp = round((sd(Mean_Value)/n()),2),
+         Count_hirons_psi.tlp = n()) %>%
+  distinct() %>%
+ select(-Mean_Value)
 
-# if else statements to create column of assigned drought designations using the above parameters
-sum_turgor$Drought_tol <- ifelse(sum_turgor$Mean_Value_psi.tlp > -2.5, "Sensitive",
-                                 ifelse((sum_turgor$Mean_Value_psi.tlp >= -3 & sum_turgor$Mean_Value_psi.tlp <= -2.5), "Moderately Sensitive",  
-                                        ifelse((sum_turgor$Mean_Value_psi.tlp >= -3.5 & sum_turgor$Mean_Value_psi.tlp < -3), "Moderately Tolerant",
-                                               ifelse(sum_turgor$Mean_Value_psi.tlp < -3.5, "Tolerant", NA))))
+
+# TDAG associations for Psi turgor loss point
+# Sensitive: > -2.5 MPa
+# Moderately Sensitive -2.5 MPa to -3 MPa
+# Moderately Tolerant -3 MPa to -3.5 MPa
+# Tolerant < -3.5 MPa
 
 
+# Barplots by Species -----------------------------------------------------
+
+
+# ALL 
 # create plots by species - bar plot
+# grouped by Source data
 
-tlp_dat <- sum_turgor %>% 
-  select(Species_short,Drought_tol) %>%
-  full_join(turgor_dat) %>%
-   filter(dat.type == "psi.tlp")
+## edited this to average across a study. 26 Sept 2024
+## Left off here. I THINK this is working the way we want? At least in terms of 
+# all species & all points (with each point an average across a study)
 
-elms <- tlp_dat %>%
-  filter(Species_short %like% "Ulmus") %>%
-  filter(dat.type == "psi.tlp")
-# 19
-
-
-tlp_dat$ExistsInDesig <- tlp_dat$Species_short %in% desig_list$Species
-
-desig_tlp_dat <- tlp_dat %>%
-  filter(ExistsInDesig == TRUE & dat.type == "psi.tlp")
+# boxplot
+spec_box_mort <- all_sum_turgor %>% filter(dat.type == "hirons_psi.tlp" & OnMortonWeb == "x") %>%
+  select(SpeciesClean, Mean_TLP_Value_Source, 
+         Source, Drought_tol_spec, 
+         Drought_tol_source) %>% distinct()
 
 
-desig_tlp_dat <- bind_rows(desig_tlp_dat, elms)
-# 366
-length(unique(desig_tlp_dat$Species_short))
-# 90, only psi.tlp data so less species than 114 below.There are 24 species with no psi.tlp data.
-
-sum_turgor$ExistsInDesig <- sum_turgor$Species_short %in% desig_list$Species
-
-desig_sum_turgor <- sum_turgor %>%
-  filter(ExistsInDesig == TRUE)
-
-elms_sum <- sum_turgor %>%
-  filter(Species_short %like% "Ulmus")
-# 19 elms
-
-
-desig_sum_turgor <- bind_rows(desig_sum_turgor, elms_sum)
-# 114
-
-ggplotly(ggplot(desig_tlp_dat,aes(x=reorder(Species_short, value), y=value))+
-             labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-             geom_boxplot() + ggtitle("Designation List Data PSI TLP")+
-             geom_point(aes(
-               text = paste(
-                 "<br> PSI TLP:", value,
-                 "<br>Cultivar:",Cultivar,
-                 "<br>Drought Tolerance:",Drought_tol,
-                 "<br>Source Data File:",Source),
-               col=Drought_tol)) +
-             theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                            size=10,vjust=0.5,
-                                                            hjust=1,face="italic"),
-                                   axis.text.x=element_text(color="black",size=10),
-                                   axis.ticks=element_line(color="black"),
-                                   axis.title=element_text(size=10),
-                                   legend.position="none")+ coord_flip(), tooltip = "text")
-
-ggplotly(ggplot(desig_tlp_dat,aes(x=reorder(Genus, value), y=value))+
-           labs(x="Genus",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
-           geom_boxplot() + ggtitle("Designation List Data PSI TLP")+
+ggplotly(ggplot(spec_box_mort,aes(x=reorder(SpeciesClean, Mean_TLP_Value_Source), y=Mean_TLP_Value_Source))+
+           labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
+           geom_boxplot() + ggtitle("All Data")+
            geom_point(aes(
              text = paste(
-               "<br> PSI TLP:", value,
-               "<br>Species:",Species_short,
-               "<br>Drought Tolerance:",Drought_tol,
+               "<br>Species:",SpeciesClean,
+               #"<br>Cultivar:", CultivarName,
+               "<br> Avg Species Level Drought Tolerance:",Drought_tol_spec,
+               "<br> Source Level Drought Tolerance:", Drought_tol_source,
+               "<br>psi TLP:", Mean_TLP_Value_Source,
+               #"<br>Count:", Count,
                "<br>Source Data File:",Source),
-             col=Drought_tol)) +
+             col=Drought_tol_source)) +
            theme_classic()+theme(axis.text.y=element_text(color="black",
                                                           size=10,vjust=0.5,
                                                           hjust=1,face="italic"),
@@ -1114,348 +1054,157 @@ ggplotly(ggplot(desig_tlp_dat,aes(x=reorder(Genus, value), y=value))+
                                  legend.position="none")+ coord_flip(), tooltip = "text")
 
 
-#combine data into one cell for the table 
-# this gives weird NA ( NA ) as character strings
-desig_sum_turgor <- desig_sum_turgor %>%  
-  mutate(P50 = paste(Mean_Value_P50, "(", SD_Value_P50, ")"),
-         P88 = paste(Mean_Value_P88, "(", SD_Value_P88, ")"),
-         psi.tlp = paste(Mean_Value_psi.tlp, "(", SD_Value_psi.tlp, ")"),
-         psi.ft = paste(Mean_Value_psi.ft, "(", SD_Value_psi.ft, ")")) %>%
-  select(-2:-11) %>%
-  rename(Species = Species_short)
-# get rid of the weird  NA ( NA ) 
-desig_sum_turgor$P50 <- ifelse(desig_sum_turgor$P50 == "NA ( NA )", NA, desig_sum_turgor$P50)
-desig_sum_turgor$P88 <- ifelse(desig_sum_turgor$P88 == "NA ( NA )", NA, desig_sum_turgor$P88)
-desig_sum_turgor$psi.tlp <- ifelse(desig_sum_turgor$psi.tlp == "NA ( NA )", NA, desig_sum_turgor$psi.tlp)
-desig_sum_turgor$psi.ft <- ifelse(desig_sum_turgor$psi.ft == "NA ( NA )", NA, desig_sum_turgor$psi.ft)
+spec_bar_mort <- all_sum_turgor %>% filter(dat.type == "hirons_psi.tlp" & OnMortonWeb == "x") %>%
+  select(SpeciesClean, Mean_TLP_Value_Species, Drought_tol_spec, SE_TLP_Value_Species) %>% distinct()
+
+# species barplot
+ggplotly(ggplot(spec_bar_mort, aes(x=reorder(SpeciesClean, Mean_TLP_Value_Species), 
+                              y = Mean_TLP_Value_Species), color = Drought_tol_spec) +
+           labs(x="Species",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
+           geom_bar(stat = "identity", 
+                    aes(
+                      text = paste(
+                        "<br>Species:",SpeciesClean,
+                        # "<br>Cultivar:", Cultivar,
+                        "<br>Species Drought Tolerance:",Drought_tol_spec,
+                        "<br>Mean psi TLP:",  Mean_TLP_Value_Species,
+                        "<br>SE psi TLP:", SE_TLP_Value_Species),
+                      col=Drought_tol_spec)) + ggtitle("All Data") +
+           geom_pointrange(aes(x = SpeciesClean, ymin = Mean_TLP_Value_Species -SE_TLP_Value_Species, 
+                               ymax =  Mean_TLP_Value_Species + SE_TLP_Value_Species),
+                           width=0.4, colour = "black", alpha=0.75, size = 0.5) + 
+           coord_flip() +
+           theme_classic() + 
+           theme(axis.text.y=element_text(color = "black", size = 10, vjust = 0.5, hjust = 1, face = "italic"),
+                 axis.text.x = element_text(color = "black", size = 10),
+                 axis.ticks = element_line(color = "black"),
+                 axis.title = element_text(size = 10),
+                 legend.position = "none")+ coord_flip(), tooltip = "text")
 
 
-desig_sum_turgor <- desig_sum_turgor %>%
-  rename(Species = Species_short)
-desig_sum_turgor <- desig_sum_turgor %>%
-left_join(.,desig)
+gen_box_mort <- all_sum_turgor %>% filter(dat.type == "hirons_psi.tlp" & OnMortonWeb == "x") %>%
+  select(Genus, SpeciesClean, Mean_TLP_Value_Species, SE_TLP_Value_Species,Drought_tol_spec,Drought_tol_Genus) %>% distinct()
 
-desig_list$HadData <- desig_list$Species %in% desig_sum_turgor$Species
+# genus boxplot
+ggplotly(ggplot(gen_box_mort,aes(x=reorder(Genus, Mean_TLP_Value_Species),
+                            y= Mean_TLP_Value_Species))+
+           labs(x="Genera",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
+           geom_boxplot() + ggtitle("All Data - Genera")+
+           geom_point(aes(
+             text = paste(
+               "<br>Species:",SpeciesClean,
+               "<br>Species Level Drought Tolerance:",Drought_tol_spec,
+               "<br>Genus Level Drought Tolerance:", Drought_tol_Genus,
+               "<br>psi TLP:", Mean_TLP_Value_Species,
+               "<br>SE psi TLP:", SE_TLP_Value_Species),
+             col=Drought_tol_spec)) +
+           theme_classic()+theme(axis.text.y=element_text(color="black",
+                                                          size=10,vjust=0.5,
+                                                          hjust=1,face="italic"),
+                                 axis.text.x=element_text(color="black",size=10),
+                                 axis.ticks=element_line(color="black"),
+                                 axis.title=element_text(size=10),
+                                 legend.position="none")+ coord_flip(), tooltip = "text")
 
-desig_nodat<- desig_list %>%
-  filter(HadData == FALSE) %>%
-  left_join(.,desig)
+gen_bar_mort <- all_sum_turgor %>% filter(dat.type == "hirons_psi.tlp" & OnMortonWeb == "x") %>%
+  select(Genus, Mean_TLP_Value_Genus, Drought_tol_Genus, SE_TLP_Value_Genus) %>% distinct()
 
-desig_sum_turgor <- bind_rows(desig_sum_turgor, desig_nodat)
-# write out csv file for the team
-#write.csv(desig_sum_turgor,"droughtdesignations_table_2024_25Sept.csv", row.names = F)
+# genus barplot
+ggplotly(ggplot(gen_bar_mort, aes(x=reorder(Genus, Mean_TLP_Value_Genus),
+                             y= Mean_TLP_Value_Genus), color = Drought_tol_Genus) +
+           labs(x="Genera",y="Leaf Water Potential at Turgor Loss Point (MPa)") +
+           geom_bar(stat = "identity", 
+                    aes(
+                      text = paste(
+                        "<br>Genus:",Genus,
+                        "<br>Genera Level Drought Tolerance:",Drought_tol_Genus,
+                        "<br>Mean psi TLP:", Mean_TLP_Value_Genus,
+                        "<br>SE psi TLP:", SE_TLP_Value_Genus),
+                      col=Drought_tol_Genus)) + ggtitle("All Data - Genera") +
+           geom_pointrange(aes(x = Genus, ymin = Mean_TLP_Value_Genus - SE_TLP_Value_Genus, 
+                               ymax = Mean_TLP_Value_Genus + SE_TLP_Value_Genus),
+                           width=0.4, colour = "black", alpha=0.75, size = 0.5) + 
+           coord_flip() +
+           theme_classic() + 
+           theme(axis.text.y=element_text(color = "black", size = 10, vjust = 0.5, hjust = 1, face = "italic"),
+                 axis.text.x = element_text(color = "black", size = 10),
+                 axis.ticks = element_line(color = "black"),
+                 axis.title = element_text(size = 10),
+                 legend.position = "none")+ coord_flip(), tooltip = "text")
 
-
-# How does our list compare to NITS? --------------------------------------
-
-# this is an absolute mess. leaving off for now. I want to intersect the
-# desig table list with NITS and ALSO intersect the full tlp_dat list with NITS
-
-# desig_list
-# combined_long
-# Species includes cultivar
-# Species_short does not include cultivar
-
-NITS <- read.csv("NITS_plantlist.csv",header=T)
-
-names(NITS)
-length(unique(NITS$Species)) # 197 unique species including cultivar
-length(unique(NITS$Species_short)) # 187 unique species not including cultivar
-
-# Cross reference this list with the designation table 
-names(desig_list)
-
-desig_list <- elms %>% select(Species) %>% bind_rows(.,desig_list) %>% select(-Species_short)
-
-NITS$ExistsInDesig <- NITS$Species_short %in% desig_list$Species
-
-int <- NITS %>%
-  filter(ExistsInDesig == F)
-# 39 species in NITS that are not on our table
-
-NITS$ExistsInAllDat <- NITS$Species_short %in% combined_long$Species_short
-int <- NITS %>%
-  filter(ExistsInAllDat == F)
-
-# 82 species in NITS that we don't have any data for in our large DF
-
-# How does our list compare to the website?
-
-TMA_web <- read.csv("TMA-TreeList.csv", header=T)
-
-
-all_lists <- TMA_web %>%
-  merge(., NITS, desig_list)
-
+desig_sum_turgor <- Morton_Web %>%
+  left_join(spec_bar_mort) %>%
+  left_join(desig) %>%
+  distinct()# %>%
+  #write.csv("2024_10_22_DroughtDesignationTable.csv",row.names=F)
 
 
-# Plots for Luke ----------------------------------------------------------
-desig_table_com
 
-turgor_dat <- turgor_dat %>%
-  mutate(o_type = ifelse(Plant_organ == "S" & dat.type == "P50", "S_P50",
-                         ifelse(Plant_organ == "P" & dat.type == "P50","P_P50",
-                                ifelse(Plant_organ == "S" & dat.type == "P88", "S_P88",
-                                ifelse(Plant_organ == "P" & dat.type == "P88", "P_P88",dat.type)))))
+# A meeting with Luke on 10/25/2024
+# need to read out a new table that has the values for cultivar include separately. 
 
-# Filter Out Outliers
 
-# filter out all values that seem suspicious < -20
-sus <- turgor_dat %>%
-  filter(value > -20 & value < 0 &
-           Reference != "Ogaya, R. and J. Penuelas. 2003. Comparative field study of Quercus ilex and Phillyrea latifolia: photosynthetic response to experimental drought conditions. Environmental and Experimental Botany 50:137-148.")
+desig_table_turgor <- turgor_dat %>%
+  filter(Plant_organ == "L" & dat.type == "hirons_psi.tlp" & OnMortonWeb == "x") %>%
+  select(Species, Source, value, dat.type) %>%
+  group_by(Species, Source) %>%
+  mutate(
+    Mean_TLP_Value_Source = round(mean(value), 2),  # Calculate mean for each group
+    SE_TLP_Value_Source = round((sd(value) / sqrt(length(value))), 2)) %>%   # Calculate standard error
+  ungroup()  %>%  # Ungroup if you're planning further joins or grouping steps
+  right_join(.,turgor_dat) %>%
+  filter(dat.type == "hirons_psi.tlp" & OnMortonWeb == "x")
 
-# Plot for TLP and P50, IF there are multiple values per species, calculated
-# mean values and plotted those. 
-a_df<-sus %>%
-  filter(o_type == "S_P50" | o_type == "psi.tlp") %>%
-  select(Species_short,o_type, value) %>%
-  group_by(Species_short, o_type) %>%
-  mutate(Mean_Value = mean(value),
-         SD_Value = sd(value),
-         Count = n()
+desig_table_turgor <- desig_table_turgor %>%
+  select(Species, Mean_TLP_Value_Source, SE_TLP_Value_Source) %>%
+  distinct() %>%
+  group_by(Species) %>%
+  mutate(Mean_TLP_Value_Species = round(mean(Mean_TLP_Value_Source), 2),     # Calculate mean for each group
+         SE_TLP_Value_Species = round((sd(Mean_TLP_Value_Source) / sqrt(length(Mean_TLP_Value_Source))), 2))%>%   # Calculate standard error
+  ungroup() %>%
+  right_join(.,desig_table_turgor) 
+
+desig_table_turgor <- desig_table_turgor %>%
+  select(Genus, Mean_TLP_Value_Species, dat.type) %>%
+  distinct() %>%
+  group_by(Genus) %>%
+  mutate(Mean_TLP_Value_Genus = round(mean(Mean_TLP_Value_Species), 2),                    # Calculate mean for each group
+         SE_TLP_Value_Genus = round((sd(Mean_TLP_Value_Species) / sqrt(length(Mean_TLP_Value_Species))), 2)   # Calculate standard error
   ) %>%
-  select(-value) %>%
-  distinct(.) %>%
-  pivot_wider(.,names_from = o_type, values_from = c(Mean_Value,SD_Value, Count)) %>%
-  filter(!is.na(Mean_Value_S_P50),!is.na(Mean_Value_psi.tlp))
-# 45
+  ungroup() %>%
+  right_join(desig_table_turgor)
 
-correlation <- cor(a_df$Mean_Value_S_P50, a_df$Mean_Value_psi.tlp)
-# r = 0.29
-p_value <- cor.test(a_df$Mean_Value_S_P50, a_df$Mean_Value_psi.tlp)$p.value
-# p = 0.05
-shapiro.test((a_df$Mean_Value_S_P50))
-# normal
-shapiro.test(a_df$Mean_Value_psi.tlp)
-# normal, p = 0.5615
-
-# try for spearman correlation
-#correlation <- cor.test(a_df$Mean_Value_P50, a_df$Mean_Value_psi.tlp, type='pearson')$estimate
-# r = 0.21
-#p_value <- cor.test(a_df$Mean_Value_P50, a_df$Mean_Value_psi.tlp, type='spearman')$p.value
-# p = 0.20
-# value is IDENTICAL for spearman and pearson
+desig_table_turgor$Drought_tol_source <- ifelse(desig_table_turgor$Mean_TLP_Value_Source > -2.5, "Sensitive",
+                                            ifelse((desig_table_turgor$Mean_TLP_Value_Source >= -3 & desig_table_turgor$Mean_TLP_Value_Source <= -2.5), "Moderately Sensitive",
+                                                   ifelse((desig_table_turgor$Mean_TLP_Value_Source >= -3.5 & desig_table_turgor$Mean_TLP_Value_Source < -3), "Moderately Tolerant",
+                                                          ifelse(desig_table_turgor$Mean_TLP_Value_Source < -3.5, "Tolerant", NA))))
 
 
 
-a <- ggplot(a_df, aes(x = Mean_Value_S_P50, y = Mean_Value_psi.tlp)) + geom_point()+
-  geom_smooth(method = "lm", color = "blue") +
-  #geom_point(aes(text = paste("<br>Species:",Species_short,
-  #                            "<br>Country:",Country)))+
-  theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                 size=10,vjust=0.5,
-                                                 hjust=1),
-                        axis.text.x=element_text(color="black",size=10),
-                        axis.ticks=element_line(color="black"),
-                        axis.title=element_text(size=10),
-                        legend.position="none") + 
-  xlab("") + ylab("Water Potential at TLP (MPa)") +
-  annotate("text", x = min(a_df$Mean_Value_S_P50), y = max(a_df$Mean_Value_psi.tlp), 
-           label = paste("r(s):", round(correlation, 2), "\n", 
-                         "p:", round(p_value, 3), "\n",
-                         "n:", 45),
-           hjust = 1, vjust = 1) +
-  geom_errorbar(
-    aes(ymin = a_df$Mean_Value_psi.tlp - a_df$SD_Value_psi.tlp,
-        ymax = a_df$Mean_Value_psi.tlp + a_df$SD_Value_psi.tlp),
-    width = 0.1,
-    color = "black"
-  ) +
-  geom_errorbarh(
-    aes(xmin = a_df$Mean_Value_S_P50 - a_df$SD_Value_S_P50,
-        xmax = a_df$Mean_Value_S_P50 + a_df$SD_Value_S_P50),
-    height = 0.1,
-    color = "black"
-  ) 
-# 45 points
+# if else statements to create column of assigned drought designations using the above parameters
+desig_table_turgor$Drought_tol_spec <- ifelse(desig_table_turgor$Mean_TLP_Value_Species > -2.5, "Sensitive",
+                                          ifelse((desig_table_turgor$Mean_TLP_Value_Species >= -3 & desig_table_turgor$Mean_TLP_Value_Species <= -2.5), "Moderately Sensitive",
+                                                 ifelse((desig_table_turgor$Mean_TLP_Value_Species >= -3.5 & desig_table_turgor$Mean_TLP_Value_Species < -3), "Moderately Tolerant",
+                                                        ifelse(desig_table_turgor$Mean_TLP_Value_Species < -3.5, "Tolerant", NA))))
 
-# Plot for TLP and P88, IF there are multiple values per species, calculated
-# mean values and plotted those. 
-b_df<- sus %>%
-  filter(o_type == "S_P88" | o_type == "psi.tlp") %>%
-  select(Species_short,o_type, value) %>%
-  group_by(Species_short, o_type) %>%
-  mutate(Mean_Value = mean(value),
-         SD_Value = sd(value),
-         Count = n()
-  ) %>%
-  select(-value) %>%
-  distinct(.) %>%
-  pivot_wider(.,names_from = o_type, values_from = c(Mean_Value,SD_Value,Count)) %>%
-  filter(!is.na(Mean_Value_S_P88),!is.na(Mean_Value_psi.tlp))
-# 51
+# sum turgor no longer has p12, p50 or p88 data summary. To make the following code work,
+# need to redo sum_turgor and change grouping variable or filter.
 
-correlation <- cor(b_df$Mean_Value_S_P88, b_df$Mean_Value_psi.tlp)
-# r = 0.21
-p_value <- cor.test(b_df$Mean_Value_S_P88, b_df$Mean_Value_psi.tlp)$p.value
-# p = 0.23
-shapiro.test((b_df$Mean_Value_S_P88))
-# not normal
-shapiro.test(b_df$Mean_Value_psi.tlp)
-# normal
-
-# try for spearman correlation
-correlation <- cor.test(b_df$Mean_Value_S_P88, b_df$Mean_Value_psi.tlp, type='pearson')$estimate
-# r = 0.21
-p_value <- cor.test(b_df$Mean_Value_S_P88, b_df$Mean_Value_psi.tlp, type='spearman')$p.value
-# p = 0.23
-# value is IDENTICAL for spearman and pearson
+desig_table_turgor$Drought_tol_Genus <- ifelse(desig_table_turgor$Mean_TLP_Value_Genus > -2.5, "Sensitive",
+                                           ifelse((desig_table_turgor$Mean_TLP_Value_Genus >= -3 & desig_table_turgor$Mean_TLP_Value_Genus <= -2.5), "Moderately Sensitive",
+                                                  ifelse((desig_table_turgor$Mean_TLP_Value_Genus >= -3.5 & desig_table_turgor$Mean_TLP_Value_Genus < -3), "Moderately Tolerant",
+                                                         ifelse(desig_table_turgor$Mean_TLP_Value_Genus < -3.5, "Tolerant", NA))))
 
 
-b <- ggplot(b_df, aes(x = Mean_Value_S_P88, y = Mean_Value_psi.tlp)) + geom_point()+
-  geom_smooth(method = "lm", color = "blue") +
-  theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                 size=10,vjust=0.5,
-                                                 hjust=1),
-                        axis.text.x=element_text(color="black",size=10),
-                        axis.ticks=element_line(color="black"),
-                        axis.title=element_text(size=10),
-                        legend.position="none") + xlab("") + ylab("") + 
-  annotate("text", x = min(b_df$Mean_Value_S_P88+1), y = max(b_df$Mean_Value_psi.tlp), 
-           label = paste("r(s):", round(correlation, 2), "\n", 
-                         "p:", round(p_value, 3), "\n",
-                         "n:", 51),
-           hjust = 1, vjust = 1) +
-  geom_errorbar(
-    aes(ymin = b_df$Mean_Value_psi.tlp - b_df$SD_Value_psi.tlp,
-        ymax = b_df$Mean_Value_psi.tlp + b_df$SD_Value_psi.tlp),
-    width = 0.1,
-    color = "black"
-  ) +
-  geom_errorbarh(
-    aes(xmin = b_df$Mean_Value_S_P88 - b_df$SD_Value_S_P88,
-        xmax = b_df$Mean_Value_S_P88 + b_df$SD_Value_S_P88),
-    height = 0.1,
-    color = "black"
-  ) 
-
-# no apparent pattern
-# positive trend, doesn't seem strong.
-
-# Plot for FT and P50, IF there are multiple values per species, calculated
-# mean values and plotted those. 
-c_df<- sus %>%
-  filter(o_type == "S_P50" | o_type == "psi.ft") %>%
-  select(Species_short,o_type, value) %>%
-  group_by(Species_short, o_type) %>%
-  mutate(Mean_Value = mean(value),
-         SD_Value = sd(value),
-         Count = n(), # Calculate the count of points in each group
-  )%>%
-  select(-value) %>%
-  distinct(.) %>% #733
-  pivot_wider(.,names_from = o_type, values_from = c(Mean_Value,SD_Value, Count)) %>%
-  filter(!is.na(Mean_Value_S_P50),!is.na(Mean_Value_psi.ft))
+Morton_Web1 <- Morton_Web %>%
+  mutate(InDatabase = SpeciesClean %in% desig_table_turgor$SpeciesClean) %>% filter(InDatabase == "FALSE")  %>%
+  select(Species, SpeciesClean)
 
 
-
-correlation <- cor(c_df$Mean_Value_S_P50, c_df$Mean_Value_psi.ft)
-# r = 0.24
-p_value <- cor.test(c_df$Mean_Value_S_P50, c_df$Mean_Value_psi.ft)$p.value
-# p = 0.15
-shapiro.test((c_df$Mean_Value_S_P50))
-# normal
-shapiro.test(c_df$Mean_Value_psi.ft)
-# normal
-
-# try for spearman correlation
-#correlation <- cor.test(c_df$Mean_Value_P50, c_df$Mean_Value_psi.ft, type='pearson')$estimate
-# r = 0.50
-#p_value <- cor.test(c_df$Mean_Value_P50, c_df$Mean_Value_psi.ft, type='spearman')$p.value
-# p = 0.002
-# value is IDENTICAL for spearman and pearson
-
-
-c <- ggplot(c_df, aes(x = Mean_Value_S_P50, y = Mean_Value_psi.ft)) + geom_point()+
-  geom_smooth(method = "lm", color = "blue") +
-  theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                 size=10,vjust=0.5,
-                                                 hjust=1),
-                        axis.text.x=element_text(color="black",size=10),
-                        axis.ticks=element_line(color="black"),
-                        axis.title=element_text(size=10),
-                        legend.position="none") + 
-  xlab("Stem P50 (MPa)") + ylab("Water Potential at Full Turgor (MPa)") +
-  annotate("text", x = min(c_df$Mean_Value_S_P50), y = max(c_df$Mean_Value_psi.ft), 
-           label = paste("r(s):", round(correlation, 2), "\n", 
-                         "p:", round(p_value, 3), "\n",
-                         "n:", 43),
-           hjust = 1, vjust = 1) +
-  geom_errorbar(
-    aes(ymin = c_df$Mean_Value_psi.ft - c_df$SD_Value_psi.ft,
-        ymax = c_df$Mean_Value_psi.ft + c_df$SD_Value_psi.ft),
-    width = 0.1,
-    color = "black"
-  ) +
-  geom_errorbarh(
-    aes(xmin = c_df$Mean_Value_S_P50 - c_df$SD_Value_S_P50,
-        xmax = c_df$Mean_Value_S_P50 + c_df$SD_Value_S_P50),
-    height = 0.1,
-    color = "black"
-  ) 
-
-
-# Plot for FT and P88, IF there are multiple values per species, calculated
-# mean values and plotted those. 
-d_df<- sus %>%
-  filter(o_type == "S_P88" | o_type == "psi.ft") %>%
-  select(Species_short,o_type, value) %>%
-  group_by(Species_short, o_type) %>%
-  mutate(Mean_Value = mean(value),
-         SD_Value = sd(value),
-         Count = n()  # Calculate the count of points in each group
-  ) %>%
-  select(-value) %>%
-  distinct(.) %>%
-  pivot_wider(.,names_from = o_type, values_from = c(Mean_Value,SD_Value, Count)) %>%
-  filter(!is.na(Mean_Value_S_P88),!is.na(Mean_Value_psi.ft))
-
-
-correlation <- cor(d_df$Mean_Value_S_P88, d_df$Mean_Value_psi.ft)
-# r = 0.28
-p_value <- cor.test(d_df$Mean_Value_S_P88, d_df$Mean_Value_psi.ft)$p.value
-# p = 0.10
-shapiro.test((d_df$Mean_Value_S_P88))
-# not normal
-shapiro.test(d_df$Mean_Value_psi.ft)
-# normal
-
-
-# try for spearman correlation
-correlation <- cor.test(d_df$Mean_Value_S_P88, d_df$Mean_Value_psi.ft, type='pearson')$estimate
-# r = 0.28
-p_value <- cor.test(d_df$Mean_Value_S_P88, d_df$Mean_Value_psi.ft, type='spearman')$p.value
-# p = 0.10
-# value is IDENTICAL for spearman and pearson
-
-d<-ggplot(d_df, aes(x = Mean_Value_S_P88, y = Mean_Value_psi.ft)) + geom_point()+
-  geom_smooth(method = "lm", color = "blue") +
-  theme_classic()+theme(axis.text.y=element_text(color="black",
-                                                 size=10,vjust=0.5,
-                                                 hjust=1),
-                        axis.text.x=element_text(color="black",size=10),
-                        axis.ticks=element_line(color="black"),
-                        axis.title=element_text(size=10),
-                        legend.position="none") + 
-  xlab("Stem P88 (MPa)") + ylab("") +
-  annotate("text", x = min(d_df$Mean_Value_S_P88+1), y = max(d_df$Mean_Value_psi.ft), 
-           label = paste("r(s):", round(correlation, 2), "\n", 
-                         "p:", round(p_value, 3), "\n",
-                         "n:", 48),
-           hjust = 1, vjust = 1) +
-  geom_errorbar(
-    aes(ymin = d_df$Mean_Value_psi.ft - d_df$SD_Value_psi.ft,
-        ymax = d_df$Mean_Value_psi.ft + d_df$SD_Value_psi.ft),
-    width = 0.1,
-    color = "black"
-  ) +
-  geom_errorbarh(
-    aes(xmin = d_df$Mean_Value_S_P88 - d_df$SD_Value_S_P88,
-        xmax = d_df$Mean_Value_S_P88 + d_df$SD_Value_S_P88),
-    height = 0.1,
-    color = "black"
-  ) 
-
-ggplotly(c)
-ggarrange(a, b, c, d, ncol = 2, nrow = 2)
+desig_sum_turgor <- desig_table_turgor %>%
+  select(6,2,9,42,44) %>%
+  bind_rows(Morton_Web1) %>%
+  left_join(desig) %>%
+  distinct() %>%
+  select(-4,-6,-7,-10,-15) %>%
+  write.csv("2024_10_25_DroughtDesignationTable.csv",row.names=F)
